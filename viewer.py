@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DEFAULT_SESSIONS_DIR = Path.home() / '.codex' / 'sessions'
-HOST = '127.0.0.1'
+HOST = os.getenv('HOST', '127.0.0.1')
 PORT = 8765
 MAX_LIST = 300
 MAX_EVENTS = 2000

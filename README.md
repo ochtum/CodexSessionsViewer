@@ -14,12 +14,28 @@ python3 viewer.py
 http://127.0.0.1:8765
 ```
 
+### Windows からワンクリック起動
+
+`launch_viewer.bat` を実行すると、Windows 側の現在フォルダを WSL パスに変換し、WSL 側で `python3 viewer.py` を起動して、既定ブラウザで `http://127.0.0.1:8765` を自動で開きます。
+
+停止する場合は `stop_viewer.bat` を実行してください。
+
+`launch_viewer.bat` は起動待ちをしてからブラウザを開きます。起動失敗時は `/tmp/codex-sessions-viewer.log` の末尾を表示します。
+
+`launch_viewer.bat` / `stop_viewer.bat` は `docker-desktop` 系を除外して利用可能な distro を自動選択します。固定したい場合は `WSL_DISTRO` を設定してください（例: `Ubuntu`）。
+
 ## オプション
 
 デフォルト以外のセッションディレクトリを使う場合は `SESSIONS_DIR` を設定します。
 
 ```bash
 SESSIONS_DIR=/path/to/sessions python3 viewer.py
+```
+
+待ち受けアドレスを変更する場合は `HOST` を設定します。
+
+```bash
+HOST=0.0.0.0 python3 viewer.py
 ```
 
 ## 画面機能
