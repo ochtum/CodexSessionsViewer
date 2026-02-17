@@ -327,6 +327,23 @@ button {
   border-radius: 4px;
   padding: 0 4px;
 }
+.detail-toolbar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: #f8fbff;
+}
+.detail-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #324255;
+  user-select: none;
+}
 #events {
   padding: 14px;
   overflow: auto;
@@ -386,11 +403,22 @@ pre {
   </aside>
   <main class="right">
     <div class="meta" id="meta">セッションを選択してください</div>
+    <div class="detail-toolbar">
+      <label><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
+      <label><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
+    </div>
     <div id="events"></div>
   </main>
 </div>
 <script>
-const state = { sessions: [], filtered: [], activePath: null };
+const state = {
+  sessions: [],
+  filtered: [],
+  activePath: null,
+  activeSession: null,
+  activeEvents: [],
+  activeRawLineCount: 0,
+};
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -476,20 +504,31 @@ function renderSessionList(){
   });
 }
 
-async function openSession(path){
-  state.activePath = path;
-  renderSessionList();
-  const r = await fetch('/api/session?path=' + encodeURIComponent(path));
-  const data = await r.json();
-  if(data.error){
-    document.getElementById('meta').textContent = data.error;
-    document.getElementById('events').innerHTML = '';
+function getDisplayEvents(){
+  let events = state.activeEvents || [];
+  if(document.getElementById('only_user_instruction').checked){
+    events = events.filter(ev => ev.kind === 'message' && ev.role === 'user');
+  }
+  if(document.getElementById('reverse_order').checked){
+    events = [...events].reverse();
+  }
+  return events;
+}
+
+function renderActiveSession(){
+  const meta = document.getElementById('meta');
+  const eventsBox = document.getElementById('events');
+  if(!state.activeSession){
+    meta.textContent = 'セッションを選択してください';
+    eventsBox.innerHTML = '';
     return;
   }
-  document.getElementById('meta').innerHTML =
-    `path: <code class="path-code">${highlightSessionPath(data.session.relative_path)}</code> | cwd: <code class="cwd-code">${esc(data.session.cwd || '-')}</code> | events: ${data.events.length} | raw lines: ${data.raw_line_count}`;
 
-  document.getElementById('events').innerHTML = data.events.map(ev => {
+  const displayEvents = getDisplayEvents();
+  meta.innerHTML =
+    `path: <code class="path-code">${highlightSessionPath(state.activeSession.relative_path)}</code> | cwd: <code class="cwd-code">${esc(state.activeSession.cwd || '-')}</code> | events: ${displayEvents.length}/${state.activeEvents.length} | raw lines: ${state.activeRawLineCount}`;
+
+  eventsBox.innerHTML = displayEvents.map(ev => {
     const role = ev.role || 'system';
     let body = '';
     if(ev.kind === 'message' || ev.kind === 'agent_update'){
@@ -505,12 +544,33 @@ async function openSession(path){
   }).join('');
 }
 
+async function openSession(path){
+  state.activePath = path;
+  renderSessionList();
+  const r = await fetch('/api/session?path=' + encodeURIComponent(path));
+  const data = await r.json();
+  if(data.error){
+    state.activeSession = null;
+    state.activeEvents = [];
+    state.activeRawLineCount = 0;
+    document.getElementById('meta').textContent = data.error;
+    document.getElementById('events').innerHTML = '';
+    return;
+  }
+  state.activeSession = data.session;
+  state.activeEvents = data.events || [];
+  state.activeRawLineCount = data.raw_line_count || 0;
+  renderActiveSession();
+}
+
 document.getElementById('cwd_q').addEventListener('input', applyFilter);
 document.getElementById('date_from').addEventListener('change', applyFilter);
 document.getElementById('date_to').addEventListener('change', applyFilter);
 document.getElementById('q').addEventListener('input', applyFilter);
 document.getElementById('mode').addEventListener('change', applyFilter);
 document.getElementById('reload').addEventListener('click', loadSessions);
+document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
+document.getElementById('reverse_order').addEventListener('change', renderActiveSession);
 loadSessions();
 </script>
 </body>
