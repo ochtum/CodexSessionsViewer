@@ -7,6 +7,8 @@
 
 WSL環境の`~/.codex/sessions` 配下の `.jsonl` を一覧・詳細表示するローカル Viewer です。
 
+[!image](/image/00001.jpg)
+
 ## ディレクトリ構成
 
 ```text
