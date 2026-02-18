@@ -1,8 +1,7 @@
 @echo off
 setlocal EnableExtensions
 
-set "APP_DIR_WIN=%~dp0"
-if "%APP_DIR_WIN:~-1%"=="\" set "APP_DIR_WIN=%APP_DIR_WIN:~0,-1%"
+for %%I in ("%~dp0..\..") do set "APP_DIR_WIN=%%~fI"
 set "URL_TO_OPEN=http://127.0.0.1:8765"
 set "MAX_WAIT=30"
 set "WSL_DIR="

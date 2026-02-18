@@ -392,10 +392,10 @@ pre {
       <input id="cwd_q" placeholder="cwd (部分一致)" />
       <input id="date_from" type="datetime-local" />
       <input id="date_to" type="datetime-local" />
-      <input id="q" placeholder="free filter" />
+      <input id="q" placeholder="keyword filter" />
       <select id="mode">
-        <option value="and">AND</option>
-        <option value="or">OR</option>
+        <option value="and">keyword AND</option>
+        <option value="or">keyword OR</option>
       </select>
       <button id="reload">Reload</button>
     </div>
@@ -441,6 +441,12 @@ function toTimestamp(ts){
   return d.getTime();
 }
 
+function parseOptionalTimestamp(raw){
+  if(!raw) return null;
+  const ts = toTimestamp(raw);
+  return Number.isNaN(ts) ? null : ts;
+}
+
 async function loadSessions(){
   const r = await fetch('/api/sessions');
   const data = await r.json();
@@ -454,37 +460,44 @@ function applyFilter(){
   const q = document.getElementById('q').value.toLowerCase().trim();
   const fromRaw = document.getElementById('date_from').value;
   const toRaw = document.getElementById('date_to').value;
-  const fromTs = fromRaw ? toTimestamp(fromRaw) : null;
-  const toTs = toRaw ? toTimestamp(toRaw) : null;
+  const fromTs = parseOptionalTimestamp(fromRaw);
+  const toTs = parseOptionalTimestamp(toRaw);
   const mode = document.getElementById('mode').value;
   const terms = q.split(new RegExp('\\\\s+')).filter(Boolean);
   state.filtered = state.sessions.filter(s => {
-    if(cwdQ && !(s.cwd || '').toLowerCase().includes(cwdQ)){
-      return false;
-    }
+    const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
+
+    let dateMatched = true;
     if(fromTs !== null || toTs !== null){
       const sessionTs = toTimestamp(s.started_at || s.mtime);
       if(Number.isNaN(sessionTs)){
-        return false;
-      }
-      if(fromTs !== null && sessionTs < fromTs){
-        return false;
-      }
-      if(toTs !== null && sessionTs > toTs){
-        return false;
+        dateMatched = false;
+      } else {
+        if(fromTs !== null && sessionTs < fromTs){
+          dateMatched = false;
+        }
+        if(toTs !== null && sessionTs > toTs){
+          dateMatched = false;
+        }
       }
     }
-    if(terms.length === 0) return true;
-    const target = (
-      s.relative_path + ' ' +
-      (s.first_real_user_text || '') + ' ' +
-      (s.first_user_text || '') + ' ' +
-      (s.search_text || '')
-    ).toLowerCase();
-    if(mode === 'or'){
-      return terms.some(t => target.includes(t));
+
+    let keywordMatched = true;
+    if(terms.length > 0){
+      const target = (
+        s.relative_path + ' ' +
+        (s.first_real_user_text || '') + ' ' +
+        (s.first_user_text || '') + ' ' +
+        (s.search_text || '')
+      ).toLowerCase();
+      if(mode === 'or'){
+        keywordMatched = terms.some(t => target.includes(t));
+      } else {
+        keywordMatched = terms.every(t => target.includes(t));
+      }
     }
-    return terms.every(t => target.includes(t));
+
+    return cwdMatched && dateMatched && keywordMatched;
   });
   renderSessionList();
 }
