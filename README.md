@@ -2,6 +2,7 @@
   <a href="README_en.md"><img src="https://img.shields.io/badge/English Mode-blue.svg" alt="English"></a>
   <a href="README.md"><img src="https://img.shields.io/badge/日本語 モード-red.svg" alt="日本語"></a>
 </p>
+
 # Codex Sessions Viewer
 
 WSL環境の`~/.codex/sessions` 配下の `.jsonl` を一覧・詳細表示するローカル Viewer です。
