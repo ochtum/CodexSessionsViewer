@@ -7,7 +7,7 @@
 
 A local viewer for browsing and inspecting `.jsonl` files under `~/.codex/sessions` in a WSL environment.
 
-[!image](/image/00001.jpg)
+![image](/image/00001.jpg)
 
 ## Directory Structure
 
