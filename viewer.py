@@ -390,8 +390,8 @@ pre {
   <aside class="left">
     <div class="toolbar">
       <input id="cwd_q" placeholder="cwd (部分一致)" />
-      <input id="date_from" type="datetime-local" />
-      <input id="date_to" type="datetime-local" />
+      <input id="date_from" type="date" />
+      <input id="date_to" type="date" />
       <input id="q" placeholder="keyword filter" />
       <select id="mode">
         <option value="and">keyword AND</option>
@@ -441,9 +441,17 @@ function toTimestamp(ts){
   return d.getTime();
 }
 
-function parseOptionalTimestamp(raw){
+function parseOptionalDateStart(raw){
   if(!raw) return null;
-  const ts = toTimestamp(raw);
+  // raw is expected as YYYY-MM-DD from <input type="date">.
+  const ts = toTimestamp(`${raw}T00:00:00`);
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function parseOptionalDateEnd(raw){
+  if(!raw) return null;
+  // Inclusive end-of-day for date-range filtering.
+  const ts = toTimestamp(`${raw}T23:59:59.999`);
   return Number.isNaN(ts) ? null : ts;
 }
 
@@ -460,8 +468,8 @@ function applyFilter(){
   const q = document.getElementById('q').value.toLowerCase().trim();
   const fromRaw = document.getElementById('date_from').value;
   const toRaw = document.getElementById('date_to').value;
-  const fromTs = parseOptionalTimestamp(fromRaw);
-  const toTs = parseOptionalTimestamp(toRaw);
+  const fromTs = parseOptionalDateStart(fromRaw);
+  const toTs = parseOptionalDateEnd(toRaw);
   const mode = document.getElementById('mode').value;
   const terms = q.split(new RegExp('\\\\s+')).filter(Boolean);
   state.filtered = state.sessions.filter(s => {
