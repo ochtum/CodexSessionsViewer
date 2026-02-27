@@ -187,6 +187,7 @@ HTML_PAGE = """<!doctype html>
   --user: #1b5fd6;
   --assistant: #0f7c4f;
   --dev: #8a5a00;
+  --system: #4b5563;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -355,17 +356,63 @@ button {
   border-radius: 10px;
   padding: 10px;
   margin-bottom: 10px;
-  background: #fff;
+  background: #fbfdff;
 }
-.ev.user { border-left-color: var(--user); background: #eaf3ff; }
+.ev.user { border-left-color: var(--user); background: #e7f1ff; }
 .ev.user_context { border-left-color: #7f8ea0; background: #f5f7fa; }
-.ev.assistant { border-left-color: var(--assistant); }
-.ev.developer { border-left-color: var(--dev); }
-.ev.system { border-left-color: #6b7280; }
+.ev.assistant { border-left-color: var(--assistant); background: #e8f8f0; }
+.ev.developer { border-left-color: var(--dev); background: #fff4e2; }
+.ev.system { border-left-color: var(--system); background: #f0f3f7; }
 .ev-head {
-  font-size: 12px;
-  color: var(--muted);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
   margin-bottom: 8px;
+}
+.badge {
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 4px 7px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.badge-kind {
+  color: #1f2937;
+  background: #eef2f7;
+  border-color: #d4dce6;
+}
+.badge-time {
+  color: #364152;
+  background: #f8fafc;
+  border-color: #dfe7f0;
+  font-variant-numeric: tabular-nums;
+}
+.ev.user .badge-role {
+  color: #0a3b96;
+  background: #d7e8ff;
+  border-color: #9dc3ff;
+}
+.ev.user_context .badge-role {
+  color: #334155;
+  background: #e5e9ef;
+  border-color: #c7d0da;
+}
+.ev.assistant .badge-role {
+  color: #0c5f3c;
+  background: #d7f3e4;
+  border-color: #99ddba;
+}
+.ev.developer .badge-role {
+  color: #7a4b00;
+  background: #ffe7bf;
+  border-color: #f4c97f;
+}
+.ev.system .badge-role {
+  color: #374151;
+  background: #e3e9f0;
+  border-color: #c0ccd9;
 }
 pre {
   margin: 0;
@@ -551,6 +598,7 @@ function renderActiveSession(){
 
   eventsBox.innerHTML = displayEvents.map(ev => {
     const role = ev.role || 'system';
+    const roleLabel = role.replace('_', ' ');
     let body = '';
     if(ev.kind === 'message' || ev.kind === 'agent_update'){
       body = `<pre>${esc(ev.text || '')}</pre>`;
@@ -561,7 +609,7 @@ function renderActiveSession(){
     } else {
       body = `<pre>${esc(JSON.stringify(ev, null, 2))}</pre>`;
     }
-    return `<div class="ev ${role}"><div class="ev-head">${esc(ev.kind)} | ${esc(role)} | ${esc(fmt(ev.timestamp))}</div>${body}</div>`;
+    return `<div class="ev ${role}"><div class="ev-head"><span class="badge badge-kind">${esc(ev.kind || 'event')}</span><span class="badge badge-role">${esc(roleLabel)}</span><span class="badge badge-time">${esc(fmt(ev.timestamp))}</span></div>${body}</div>`;
   }).join('');
 }
 
