@@ -1,29 +1,148 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import urllib.parse
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Optional
 
 DEFAULT_SESSIONS_DIR = Path.home() / '.codex' / 'sessions'
+WINDOWS_USERS_DIR = Path('/mnt/c/Users')
 HOST = os.getenv('HOST', '127.0.0.1')
 PORT = 8765
 MAX_LIST = 300
 MAX_EVENTS = 2000
+_CACHED_SESSIONS_DIR = None
+_CACHED_SESSION_ROOTS = None
+
+
+def is_wsl() -> bool:
+    if os.getenv('WSL_DISTRO_NAME'):
+        return True
+    try:
+        return 'microsoft' in Path('/proc/version').read_text(encoding='utf-8').lower()
+    except Exception:
+        return False
+
+
+def windows_path_to_wsl(path_str: str) -> Optional[Path]:
+    m = re.match(r'^([A-Za-z]):[\\/](.*)$', path_str)
+    if not m:
+        return None
+    drive = m.group(1).lower()
+    rest = m.group(2).replace('\\', '/').lstrip('/')
+    return Path('/mnt') / drive / rest
+
+
+def normalize_sessions_dir(path_str: str) -> Path:
+    p = Path(path_str).expanduser()
+    converted = windows_path_to_wsl(path_str)
+    if converted is not None and not p.exists():
+        return converted
+    return p
+
+
+def discover_wsl_windows_sessions_dirs():
+    candidates = []
+    users = []
+    for key in ('WIN_USERNAME', 'USERNAME'):
+        value = os.getenv(key, '').strip()
+        if value:
+            users.append(value)
+    for user in users:
+        candidates.append(WINDOWS_USERS_DIR / user / '.codex' / 'sessions')
+    if WINDOWS_USERS_DIR.exists():
+        for user_dir in sorted(WINDOWS_USERS_DIR.iterdir(), key=lambda p: p.name.lower()):
+            if user_dir.is_dir():
+                candidates.append(user_dir / '.codex' / 'sessions')
+    seen = set()
+    ordered = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(candidate)
+    return ordered
+
+
+def _unique_paths(paths):
+    seen = set()
+    ordered = []
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(path)
+    return ordered
+
+
+def get_session_roots():
+    global _CACHED_SESSION_ROOTS
+    if _CACHED_SESSION_ROOTS is not None:
+        return _CACHED_SESSION_ROOTS
+
+    raw = os.getenv('SESSIONS_DIR')
+    if raw:
+        _CACHED_SESSION_ROOTS = [normalize_sessions_dir(raw)]
+        return _CACHED_SESSION_ROOTS
+
+    candidates = [DEFAULT_SESSIONS_DIR]
+    if is_wsl():
+        candidates.extend(discover_wsl_windows_sessions_dirs())
+    candidates = _unique_paths(candidates)
+
+    existing = [p for p in candidates if p.exists()]
+    _CACHED_SESSION_ROOTS = existing if existing else candidates
+    return _CACHED_SESSION_ROOTS
 
 
 def get_sessions_dir() -> Path:
-    raw = os.getenv('SESSIONS_DIR')
-    if raw:
-        return Path(raw).expanduser()
-    return DEFAULT_SESSIONS_DIR
+    global _CACHED_SESSIONS_DIR
+    if _CACHED_SESSIONS_DIR is not None:
+        return _CACHED_SESSIONS_DIR
+
+    roots = get_session_roots()
+    _CACHED_SESSIONS_DIR = roots[0] if roots else DEFAULT_SESSIONS_DIR
+    return _CACHED_SESSIONS_DIR
 
 
 def iter_session_files(root: Path):
     if not root.exists():
         return []
     return sorted(root.rglob('*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def iter_all_session_files(roots):
+    files = []
+    for root in roots:
+        files.extend(iter_session_files(root))
+    unique = {}
+    for path in files:
+        unique[str(path)] = path
+    return sorted(unique.values(), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def classify_source(raw_source: str, originator: str) -> str:
+    source = (raw_source or '').strip().lower()
+    if source in ('cli', 'vscode'):
+        return source
+    origin = (originator or '').strip().lower()
+    if 'vscode' in source or 'vscode' in origin:
+        return 'vscode'
+    if 'cli' in source or 'cli' in origin:
+        return 'cli'
+    return 'cli'
+
+
+def to_relative_path(path: Path) -> str:
+    for root in get_session_roots():
+        try:
+            return str(path.relative_to(root))
+        except Exception:
+            pass
+    return str(path)
 
 
 def summarize_session(path: Path):
@@ -36,6 +155,7 @@ def summarize_session(path: Path):
         'started_at': '',
         'cwd': '',
         'model': '',
+        'source': 'cli',
         'first_user_text': '',
         'first_real_user_text': '',
         'search_text': '',
@@ -43,10 +163,7 @@ def summarize_session(path: Path):
     search_chunks = []
     search_len = 0
     search_limit = 2000
-    try:
-        summary['relative_path'] = str(path.relative_to(get_sessions_dir()))
-    except Exception:
-        pass
+    summary['relative_path'] = to_relative_path(path)
 
     try:
         with path.open('r', encoding='utf-8') as f:
@@ -59,6 +176,7 @@ def summarize_session(path: Path):
                     summary['started_at'] = payload.get('timestamp', '')
                     summary['cwd'] = payload.get('cwd', '')
                     summary['model'] = payload.get('model_provider', '')
+                    summary['source'] = classify_source(payload.get('source', ''), payload.get('originator', ''))
                 elif t == 'response_item':
                     if payload.get('type') == 'message':
                         chunk = extract_text_from_content(payload.get('content', []))
@@ -293,6 +411,41 @@ button {
   font-size: 12px;
   color: #34414f;
 }
+.session-meta-row {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.session-badge {
+  display: inline-block;
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  border: 1px solid #c7d8ea;
+  background: #f2f8ff;
+}
+.session-id {
+  color: #334155;
+  background: #eef2f7;
+  border-color: #d4dde8;
+}
+.session-source {
+  color: #0b3a67;
+  background: #e6f1ff;
+  border-color: #bdd9f7;
+  font-weight: 700;
+}
+.session-source.source-vscode {
+  color: #0f5a5a;
+  background: #e5f7f7;
+  border-color: #bfe8e8;
+}
+.session-source.source-cli {
+  color: #0b3a67;
+  background: #e6f1ff;
+  border-color: #bdd9f7;
+}
 .right {
   background: var(--panel);
   display: flex;
@@ -327,6 +480,30 @@ button {
   background: #fff3de;
   border-radius: 4px;
   padding: 0 4px;
+}
+.meta code.time-code {
+  color: #6b4300;
+  background: #fff3de;
+  border: 1px solid #f0d3a1;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+.meta code.source-code {
+  border: 1px solid #bdd9f7;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+.meta code.source-code.source-vscode {
+  color: #0f5a5a;
+  background: #e5f7f7;
+  border-color: #bfe8e8;
+}
+.meta code.source-code.source-cli {
+  color: #0b3a67;
+  background: #e6f1ff;
+  border-color: #bdd9f7;
 }
 .detail-toolbar {
   padding: 10px 12px;
@@ -444,6 +621,11 @@ pre {
         <option value="and">keyword AND</option>
         <option value="or">keyword OR</option>
       </select>
+      <select id="source_filter">
+        <option value="all">source: all</option>
+        <option value="cli">source: CLI</option>
+        <option value="vscode">source: VS Code</option>
+      </select>
       <button id="reload">Reload</button>
     </div>
     <div id="sessions"></div>
@@ -474,6 +656,22 @@ function esc(s){
 function highlightSessionPath(s){
   const safe = esc(s);
   return safe.replace(/(\\d{4}-\\d{2}-\\d{2}T\\d{2}[-:]\\d{2}[-:]\\d{2}(?:[-:]\\d{3,6})?)/g, '<span class="ts">$1</span>');
+}
+
+function normalizeSource(source){
+  const raw = (source || '').toLowerCase();
+  return raw === 'vscode' ? 'vscode' : 'cli';
+}
+
+function sourceLabel(source){
+  const key = normalizeSource(source);
+  return key === 'vscode' ? 'VS Code' : 'CLI';
+}
+
+function normalizeSourceFilter(source){
+  const raw = (source || '').toLowerCase();
+  if(raw === 'all') return 'all';
+  return normalizeSource(raw);
 }
 
 function fmt(ts){
@@ -513,6 +711,7 @@ async function loadSessions(){
 function applyFilter(){
   const cwdQ = document.getElementById('cwd_q').value.toLowerCase().trim();
   const q = document.getElementById('q').value.toLowerCase().trim();
+  const sourceFilter = normalizeSourceFilter(document.getElementById('source_filter').value || 'all');
   const fromRaw = document.getElementById('date_from').value;
   const toRaw = document.getElementById('date_to').value;
   const fromTs = parseOptionalDateStart(fromRaw);
@@ -521,6 +720,7 @@ function applyFilter(){
   const terms = q.split(new RegExp('\\\\s+')).filter(Boolean);
   state.filtered = state.sessions.filter(s => {
     const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
+    const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
 
     let dateMatched = true;
     if(fromTs !== null || toTs !== null){
@@ -552,7 +752,7 @@ function applyFilter(){
       }
     }
 
-    return cwdMatched && dateMatched && keywordMatched;
+    return cwdMatched && sourceMatched && dateMatched && keywordMatched;
   });
   renderSessionList();
 }
@@ -563,8 +763,14 @@ function renderSessionList(){
     <div class="session-item ${state.activePath === s.path ? 'active' : ''}" data-path="${esc(s.path)}">
       <div class="session-path">${highlightSessionPath(s.relative_path)}</div>
       <div class="session-preview">${esc(s.first_real_user_text || s.first_user_text || '(previewなし)')}</div>
-      <div class="session-path session-cwd">cwd: ${esc(s.cwd || '-')}</div>
-      <div class="session-path session-time">${esc(fmt(s.started_at || s.mtime))}</div>
+      <div class="session-meta-row">
+        <div class="session-badge session-time">${esc(fmt(s.started_at || s.mtime))}</div>
+        <div class="session-badge session-source source-${esc(normalizeSource(s.source))}">${esc(sourceLabel(s.source))}</div>
+      </div>
+      <div class="session-meta-row">
+        <div class="session-badge session-cwd">cwd: ${esc(s.cwd || '-')}</div>
+        <div class="session-badge session-id">id: ${esc(s.session_id || s.id || '')}</div>
+      </div>
     </div>
   `).join('');
   box.querySelectorAll('.session-item').forEach(el => {
@@ -593,8 +799,9 @@ function renderActiveSession(){
   }
 
   const displayEvents = getDisplayEvents();
+  const source = normalizeSource(state.activeSession.source);
   meta.innerHTML =
-    `path: <code class="path-code">${highlightSessionPath(state.activeSession.relative_path)}</code> | cwd: <code class="cwd-code">${esc(state.activeSession.cwd || '-')}</code> | events: ${displayEvents.length}/${state.activeEvents.length} | raw lines: ${state.activeRawLineCount}`;
+    `path: <code class="path-code">${highlightSessionPath(state.activeSession.relative_path)}</code> | cwd: <code class="cwd-code">${esc(state.activeSession.cwd || '-')}</code> | time: <code class="time-code">${esc(fmt(state.activeSession.started_at || state.activeSession.mtime))}</code> | source: <code class="source-code source-${esc(source)}">${esc(sourceLabel(source))}</code> | events: ${displayEvents.length}/${state.activeEvents.length} | raw lines: ${state.activeRawLineCount}`;
 
   eventsBox.innerHTML = displayEvents.map(ev => {
     const role = ev.role || 'system';
@@ -637,6 +844,7 @@ document.getElementById('date_from').addEventListener('change', applyFilter);
 document.getElementById('date_to').addEventListener('change', applyFilter);
 document.getElementById('q').addEventListener('input', applyFilter);
 document.getElementById('mode').addEventListener('change', applyFilter);
+document.getElementById('source_filter').addEventListener('change', applyFilter);
 document.getElementById('reload').addEventListener('click', loadSessions);
 document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
 document.getElementById('reverse_order').addEventListener('change', renderActiveSession);
@@ -674,23 +882,29 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == '/api/sessions':
-            root = get_sessions_dir()
-            files = iter_session_files(root)[:MAX_LIST]
+            roots = get_session_roots()
+            files = iter_all_session_files(roots)[:MAX_LIST]
             sessions = [summarize_session(p) for p in files]
-            self._send_json({'root': str(root), 'sessions': sessions})
+            self._send_json({'root': ' | '.join(str(x) for x in roots), 'sessions': sessions})
             return
 
         if parsed.path == '/api/session':
-            root = get_sessions_dir().resolve()
+            roots = [x.resolve() for x in get_session_roots()]
             q = urllib.parse.parse_qs(parsed.query)
             raw_path = q.get('path', [''])[0]
             if not raw_path:
                 self._send_json({'error': 'path is required'}, 400)
                 return
             p = Path(raw_path).expanduser().resolve()
-            try:
-                p.relative_to(root)
-            except Exception:
+            is_under_known_root = False
+            for root in roots:
+                try:
+                    p.relative_to(root)
+                    is_under_known_root = True
+                    break
+                except Exception:
+                    continue
+            if not is_under_known_root:
                 self._send_json({'error': 'path is outside sessions dir'}, 400)
                 return
             if not p.exists() or not p.is_file():
@@ -708,7 +922,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f'Viewer: http://{HOST}:{PORT}')
-    print(f'Sessions dir: {get_sessions_dir()}')
+    for root in get_session_roots():
+        print(f'Sessions dir: {root}')
     server.serve_forever()
 
 

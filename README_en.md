@@ -5,7 +5,9 @@
 
 # Codex Sessions Viewer
 
-A local viewer for browsing and inspecting `.jsonl` files under `~/.codex/sessions` in a WSL environment.
+A local viewer for browsing and inspecting `.jsonl` files under `~/.codex/sessions`.  
+When running in WSL, if `~/.codex/sessions` is not found, it also auto-discovers the Windows location `C:\Users\<user>\.codex\sessions` (`/mnt/c/Users/<user>/.codex/sessions`).
+If sessions exist on both WSL and Windows sides, it loads and lists both.
 
 ![image](/image/00001.jpg)
 
@@ -59,7 +61,8 @@ To unregister it:
 
 ## Options
 
-To use a non-default sessions directory, set `SESSIONS_DIR`.
+To use a non-default sessions directory, set `SESSIONS_DIR`.  
+In WSL, Windows-style paths (for example, `C:\Users\workuser\.codex\sessions`) are automatically converted.
 
 ```bash
 SESSIONS_DIR=/path/to/sessions python3 viewer.py
@@ -74,6 +77,7 @@ HOST=0.0.0.0 python3 viewer.py
 ## UI Features
 
 - Left pane: session list (newest first)
+- Session `source` labels (`CLI` / `VS Code`) are shown in the list
 - Top-left filters: narrow down by path and first user input
 - Search is partial match and also targets the first message set in each session
 - `cwd` / date-time / keyword are always combined with AND
@@ -81,6 +85,7 @@ HOST=0.0.0.0 python3 viewer.py
   - `AND`: must include all space-separated keywords
   - `OR`: must include at least one space-separated keyword
 - Right pane: timeline of events for the selected session
+  - The detail header also shows the `source` label (`CLI` / `VS Code`)
   - `message` (`user` / `assistant` / `developer`)
   - `user` messages are shown with a light-blue background; execution context such as `AGENTS.md` and `environment_context` is shown in gray
   - `function_call` / `function_output`
