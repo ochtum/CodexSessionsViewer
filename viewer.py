@@ -522,6 +522,13 @@ button {
   color: #324255;
   user-select: none;
 }
+.detail-toolbar #copy_resume_command {
+  background: #0f766e;
+}
+.detail-toolbar #copy_resume_command:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
 #events {
   padding: 14px;
   overflow: auto;
@@ -643,6 +650,7 @@ pre {
       <label><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
       <label><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
       <label><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
+      <button id="copy_resume_command" disabled>セッション再開コマンドコピー</button>
     </div>
     <div id="events"></div>
   </main>
@@ -706,6 +714,56 @@ function parseOptionalDateEnd(raw){
   // Inclusive end-of-day for date-range filtering.
   const ts = toTimestamp(`${raw}T23:59:59.999`);
   return Number.isNaN(ts) ? null : ts;
+}
+
+function getActiveSessionId(){
+  if(!state.activeSession) return '';
+  return (state.activeSession.session_id || state.activeSession.id || '').toString().trim();
+}
+
+function updateCopyResumeButtonState(){
+  const button = document.getElementById('copy_resume_command');
+  button.disabled = !getActiveSessionId();
+}
+
+async function copyResumeCommand(){
+  const sessionId = getActiveSessionId();
+  if(!sessionId) return;
+
+  const commandText = 'codex resume ' + sessionId;
+  let copied = false;
+  try {
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(commandText);
+      copied = true;
+    }
+  } catch (e) {
+    copied = false;
+  }
+
+  if(!copied){
+    const helper = document.createElement('textarea');
+    helper.value = commandText;
+    helper.setAttribute('readonly', '');
+    helper.style.position = 'fixed';
+    helper.style.opacity = '0';
+    document.body.appendChild(helper);
+    helper.select();
+    try {
+      copied = document.execCommand('copy');
+    } finally {
+      document.body.removeChild(helper);
+    }
+  }
+
+  if(copied){
+    const button = document.getElementById('copy_resume_command');
+    const original = button.textContent;
+    button.textContent = 'コピーしました';
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1200);
+  }
 }
 
 async function loadSessions(){
@@ -808,6 +866,7 @@ function renderActiveSession(){
   if(!state.activeSession){
     meta.textContent = 'セッションを選択してください';
     eventsBox.innerHTML = '';
+    updateCopyResumeButtonState();
     return;
   }
 
@@ -831,6 +890,7 @@ function renderActiveSession(){
     }
     return `<div class="ev ${role}"><div class="ev-head"><span class="badge badge-kind">${esc(ev.kind || 'event')}</span><span class="badge badge-role">${esc(roleLabel)}</span><span class="badge badge-time">${esc(fmt(ev.timestamp))}</span></div>${body}</div>`;
   }).join('');
+  updateCopyResumeButtonState();
 }
 
 async function openSession(path){
@@ -862,6 +922,8 @@ document.getElementById('reload').addEventListener('click', loadSessions);
 document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
 document.getElementById('only_ai_response').addEventListener('change', renderActiveSession);
 document.getElementById('reverse_order').addEventListener('change', renderActiveSession);
+document.getElementById('copy_resume_command').addEventListener('click', copyResumeCommand);
+updateCopyResumeButtonState();
 loadSessions();
 </script>
 </body>

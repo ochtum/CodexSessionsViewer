@@ -86,6 +86,11 @@ HOST=0.0.0.0 python3 viewer.py
   - `OR`: スペース区切りキーワードのどれかを含む
 - 右ペイン: 選択セッションのイベント時系列表示
   - 詳細ヘッダーに `source` ラベル（`CLI` / `VS Code`）を表示
+  - 表示オプション
+    - 「ユーザー指示のみ表示」
+    - 「AIレスポンスのみ表示」
+    - 「表示順を逆にする」
+  - 「セッション再開コマンドコピー」ボタンで `codex resume <セッションID>` をコピー
   - `message`（user / assistant / developer）
   - `user` は薄青背景、`AGENTS.md` や `environment_context` などの実行コンテキストはグレー背景で表示
   - `function_call` / `function_output`

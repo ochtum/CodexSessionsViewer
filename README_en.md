@@ -86,6 +86,11 @@ HOST=0.0.0.0 python3 viewer.py
   - `OR`: must include at least one space-separated keyword
 - Right pane: timeline of events for the selected session
   - The detail header also shows the `source` label (`CLI` / `VS Code`)
+  - Display options
+    - `Show only user instructions`
+    - `Show only AI responses`
+    - `Reverse display order`
+  - A `Copy Resume Command` button copies `codex resume <session_id>`
   - `message` (`user` / `assistant` / `developer`)
   - `user` messages are shown with a light-blue background; execution context such as `AGENTS.md` and `environment_context` is shown in gray
   - `function_call` / `function_output`
