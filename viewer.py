@@ -14,6 +14,7 @@ HOST = os.getenv('HOST', '127.0.0.1')
 PORT = 8765
 MAX_LIST = 300
 MAX_EVENTS = 2000
+SEARCH_TEXT_LIMIT = 50000
 _CACHED_SESSIONS_DIR = None
 _CACHED_SESSION_ROOTS = None
 
@@ -162,7 +163,7 @@ def summarize_session(path: Path):
     }
     search_chunks = []
     search_len = 0
-    search_limit = 2000
+    search_limit = SEARCH_TEXT_LIMIT
     summary['relative_path'] = to_relative_path(path)
 
     try:
@@ -783,7 +784,7 @@ function applyFilter(){
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
   const mode = document.getElementById('mode').value;
-  const terms = q.split(new RegExp('\\\\s+')).filter(Boolean);
+  const terms = q.split(/\\s+/).filter(Boolean);
   state.filtered = state.sessions.filter(s => {
     const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
     const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
