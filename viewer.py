@@ -642,6 +642,7 @@ pre {
         <option value="vscode">source: VS Code</option>
       </select>
       <button id="reload">Reload</button>
+      <button id="clear">Clear</button>
     </div>
     <div id="sessions"></div>
   </aside>
@@ -665,6 +666,8 @@ const state = {
   activeEvents: [],
   activeRawLineCount: 0,
 };
+
+const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -768,10 +771,76 @@ async function copyResumeCommand(){
 }
 
 async function loadSessions(){
-  const r = await fetch('/api/sessions');
+  const r = await fetch('/api/sessions?ts=' + Date.now(), { cache: 'no-store' });
   const data = await r.json();
   state.sessions = data.sessions;
   document.getElementById('root').textContent = data.root;
+  applyFilter();
+  if(state.activePath){
+    const exists = state.sessions.some(s => s.path === state.activePath);
+    if(exists){
+      await openSession(state.activePath);
+    } else {
+      state.activePath = null;
+      state.activeSession = null;
+      state.activeEvents = [];
+      state.activeRawLineCount = 0;
+      renderSessionList();
+      renderActiveSession();
+    }
+  }
+}
+
+function saveFilters(){
+  const payload = {
+    cwd_q: document.getElementById('cwd_q').value,
+    date_from: document.getElementById('date_from').value,
+    date_to: document.getElementById('date_to').value,
+    q: document.getElementById('q').value,
+    mode: document.getElementById('mode').value,
+    source_filter: document.getElementById('source_filter').value,
+  };
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    // Ignore storage write errors.
+  }
+}
+
+function restoreFilters(){
+  let raw = null;
+  try {
+    raw = localStorage.getItem(FILTER_STORAGE_KEY);
+  } catch (e) {
+    raw = null;
+  }
+  if(!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    if(typeof data.cwd_q === 'string') document.getElementById('cwd_q').value = data.cwd_q;
+    if(typeof data.date_from === 'string') document.getElementById('date_from').value = data.date_from;
+    if(typeof data.date_to === 'string') document.getElementById('date_to').value = data.date_to;
+    if(typeof data.q === 'string') document.getElementById('q').value = data.q;
+    if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
+    const source = normalizeSourceFilter(data.source_filter || 'all');
+    document.getElementById('source_filter').value = source;
+  } catch (e) {
+    // Ignore invalid saved filters.
+  }
+}
+
+function clearFilters(){
+  document.getElementById('cwd_q').value = '';
+  document.getElementById('date_from').value = '';
+  document.getElementById('date_to').value = '';
+  document.getElementById('q').value = '';
+  document.getElementById('mode').value = 'and';
+  document.getElementById('source_filter').value = 'all';
+  try {
+    localStorage.removeItem(FILTER_STORAGE_KEY);
+  } catch (e) {
+    // Ignore storage delete errors.
+  }
   applyFilter();
 }
 
@@ -821,6 +890,7 @@ function applyFilter(){
 
     return cwdMatched && sourceMatched && dateMatched && keywordMatched;
   });
+  saveFilters();
   renderSessionList();
 }
 
@@ -920,11 +990,13 @@ document.getElementById('q').addEventListener('input', applyFilter);
 document.getElementById('mode').addEventListener('change', applyFilter);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
 document.getElementById('reload').addEventListener('click', loadSessions);
+document.getElementById('clear').addEventListener('click', clearFilters);
 document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
 document.getElementById('only_ai_response').addEventListener('change', renderActiveSession);
 document.getElementById('reverse_order').addEventListener('change', renderActiveSession);
 document.getElementById('copy_resume_command').addEventListener('click', copyResumeCommand);
 updateCopyResumeButtonState();
+restoreFilters();
 loadSessions();
 </script>
 </body>
@@ -933,21 +1005,29 @@ loadSessions();
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _send_raw(self, raw, content_type, status=200):
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return True
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return False
+        except OSError as e:
+            # Ignore common disconnect errors from clients closing tabs/reloading.
+            if getattr(e, 'errno', None) in {32, 104}:
+                return False
+            raise
+
     def _send_json(self, data, status=200):
         raw = json.dumps(data, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        self._send_raw(raw, 'application/json; charset=utf-8', status)
 
     def _send_html(self, text, status=200):
         raw = text.encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        self._send_raw(raw, 'text/html; charset=utf-8', status)
 
     def log_message(self, fmt, *args):
         return
