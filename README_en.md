@@ -9,7 +9,15 @@ A local viewer for browsing and inspecting `.jsonl` files under `~/.codex/sessio
 When running in WSL, if `~/.codex/sessions` is not found, it also auto-discovers the Windows location `C:\Users\<user>\.codex\sessions` (`/mnt/c/Users/<user>/.codex/sessions`).
 If sessions exist on both WSL and Windows sides, it loads and lists both.
 
+## Screen Layout
+
+### Main Window
+
 ![image](/image/00001.jpg)
+
+### Label Management Window
+
+![image](/image/00002.jpg)
 
 ## Directory Structure
 
@@ -77,27 +85,41 @@ HOST=0.0.0.0 python3 viewer.py
 ## UI Features
 
 - Left pane: session list (newest first)
-- Session `source` labels (`CLI` / `VS Code`) are shown in the list
-- Top-left filters: narrow down by path and first user input
-- Search is partial match and also targets the first message set in each session
-- `cwd` / date-time / keyword are always combined with AND
-- `AND/OR` switch applies only within the keyword field
-  - `AND`: must include all space-separated keywords
-  - `OR`: must include at least one space-separated keyword
-- Right pane: timeline of events for the selected session
+  - Shows session `source` labels (`CLI` / `VS Code`) and session labels in the list
+  - `Reload` reloads the session list
+  - `Clear` resets the left-pane search conditions
+  - `Hide` / `Show` collapses or expands the search panel
+- Top-left filters
+  - Filter by `cwd` / date-time / keywords / `source` / session label / event label
+  - Keyword search uses a SQLite-backed full-text index
+  - Search covers not only `message`, but also `function_call.arguments` / `function_output.output` / `agent_update.message`
+  - `cwd` / date-time / `source` / label conditions are always evaluated with AND
+  - The `AND/OR` switch applies only to the keyword field
+    - `AND`: must include all space-separated keywords
+    - `OR`: must include at least one space-separated keyword
+- Right pane: chronological event view for the selected session
   - The detail header also shows the `source` label (`CLI` / `VS Code`)
   - Display options
     - `Show only user instructions`
     - `Show only AI responses`
     - `Reverse display order`
-  - A `Copy Resume Command` button copies `codex resume <session_id>`
+    - `event label: all` filter
+  - `Refresh` reloads only the currently selected session
+  - `Copy Resume Command` copies `codex resume <session_id>`
+  - Session label display and `Add Session Label`
+  - Per-event label display / add / remove
   - `message` (`user` / `assistant` / `developer`)
   - `user` messages are shown with a light-blue background; execution context such as `AGENTS.md` and `environment_context` is shown in gray
   - `function_call` / `function_output`
   - `agent_update`
+- Label Management
+  - Opened in a separate window from the `Label Management` button in the upper-right
+  - Manages session labels and event labels in a shared UI
+  - Label colors can be set by entering `#hex` / `rgb(...)` / `oklch(...)` directly or by choosing a color preset
 
 ## Notes
 
+- The search index is stored in `.cache/search_index.sqlite3` and only changed sessions are updated incrementally.
 - For large logs, the list is capped at `300` sessions and events are capped at `2000`.
 - The viewer listens only on localhost (`127.0.0.1`).
 
