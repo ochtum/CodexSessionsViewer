@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import sqlite3
+import threading
 import urllib.parse
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,8 +17,15 @@ PORT = 8765
 MAX_LIST = 300
 MAX_EVENTS = 2000
 SEARCH_TEXT_LIMIT = 50000
+SUMMARY_SCAN_LINE_LIMIT = 400
+SEARCH_INDEX_TEXT_LIMIT = 0
+SEARCH_INDEX_SCHEMA_VERSION = 2
+SEARCH_INDEX_DB_PATH = Path(__file__).resolve().parent / '.cache' / 'search_index.sqlite3'
 _CACHED_SESSIONS_DIR = None
 _CACHED_SESSION_ROOTS = None
+_SESSION_CACHE = {}
+_SESSION_CACHE_LOCK = threading.Lock()
+_SEARCH_INDEX_LOCK = threading.Lock()
 
 
 def is_wsl() -> bool:
@@ -146,12 +155,359 @@ def to_relative_path(path: Path) -> str:
     return str(path)
 
 
-def summarize_session(path: Path):
+def stringify_search_value(value) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+def normalize_search_text(text: str) -> str:
+    if not text:
+        return ''
+    return re.sub(r'\s+', ' ', text).strip().lower()
+
+
+def append_search_chunk(chunks, text: str, current_len: int, limit: int) -> int:
+    normalized = normalize_search_text(text)
+    unlimited = limit <= 0
+    if not normalized or (not unlimited and current_len >= limit):
+        return current_len
+    if not unlimited:
+        remaining = limit - current_len
+        if len(normalized) > remaining:
+            normalized = normalized[:remaining]
+    chunks.append(normalized)
+    return current_len + len(normalized)
+
+
+def set_cached_summary(path: Path, signature, summary):
+    key = str(path)
+    with _SESSION_CACHE_LOCK:
+        entry = _SESSION_CACHE.get(key)
+        if not entry or entry.get('signature') != signature:
+            entry = {'signature': signature, 'summary': None, 'events': None}
+            _SESSION_CACHE[key] = entry
+        entry['summary'] = summary
+
+
+def open_search_index_connection():
+    SEARCH_INDEX_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(SEARCH_INDEX_DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA busy_timeout=30000')
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        '''
+    )
+    row = conn.execute("SELECT value FROM app_meta WHERE key = 'schema_version'").fetchone()
+    if row is None or row['value'] != str(SEARCH_INDEX_SCHEMA_VERSION):
+        with conn:
+            conn.execute('DROP TABLE IF EXISTS session_index')
+            conn.execute("DELETE FROM app_meta WHERE key = 'schema_version'")
+            conn.execute(
+                'INSERT INTO app_meta (key, value) VALUES (?, ?)',
+                ('schema_version', str(SEARCH_INDEX_SCHEMA_VERSION)),
+            )
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS session_index (
+            path TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            mtime_iso TEXT NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            size INTEGER NOT NULL,
+            session_id TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            model TEXT NOT NULL,
+            source TEXT NOT NULL,
+            first_user_text TEXT NOT NULL,
+            first_real_user_text TEXT NOT NULL,
+            search_text TEXT NOT NULL
+        )
+        '''
+    )
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_session_index_mtime_ns ON session_index (mtime_ns DESC)')
+    return conn
+
+
+def summary_from_index_row(row):
+    return {
+        'id': row['id'],
+        'path': row['path'],
+        'relative_path': row['relative_path'],
+        'mtime': row['mtime_iso'],
+        'session_id': row['session_id'],
+        'started_at': row['started_at'],
+        'cwd': row['cwd'],
+        'model': row['model'],
+        'source': row['source'],
+        'first_user_text': row['first_user_text'],
+        'first_real_user_text': row['first_real_user_text'],
+    }
+
+
+def build_search_index_record(path: Path, stat_result=None):
+    st = stat_result if stat_result is not None else path.stat()
+    summary = {
+        'id': path.stem,
+        'path': str(path),
+        'relative_path': to_relative_path(path),
+        'mtime': datetime.fromtimestamp(st.st_mtime).isoformat(),
+        'session_id': '',
+        'started_at': '',
+        'cwd': '',
+        'model': '',
+        'source': 'cli',
+        'first_user_text': '',
+        'first_real_user_text': '',
+    }
+    search_chunks = []
+    search_len = 0
+
+    try:
+        with path.open('r', encoding='utf-8') as f:
+            for line in f:
+                obj = json.loads(line)
+                t = obj.get('type')
+                payload = obj.get('payload', {})
+                if t == 'session_meta':
+                    summary['session_id'] = payload.get('id', '')
+                    summary['started_at'] = payload.get('timestamp', '')
+                    summary['cwd'] = payload.get('cwd', '')
+                    summary['model'] = payload.get('model_provider', '')
+                    summary['source'] = classify_source(payload.get('source', ''), payload.get('originator', ''))
+                elif t == 'response_item':
+                    p_type = payload.get('type')
+                    if p_type == 'message':
+                        text = extract_text_from_content(payload.get('content', []))
+                        if text:
+                            search_len = append_search_chunk(search_chunks, text, search_len, SEARCH_INDEX_TEXT_LIMIT)
+                        if payload.get('role') == 'user' and not summary['first_user_text']:
+                            content = payload.get('content', [])
+                            for item in content:
+                                text = item.get('text', '') if isinstance(item, dict) else ''
+                                if text:
+                                    summary['first_user_text'] = text.strip().replace('\n', ' ')[:120]
+                                    break
+                        if payload.get('role') == 'user' and not summary['first_real_user_text']:
+                            content = payload.get('content', [])
+                            raw = ''
+                            for item in content:
+                                text = item.get('text', '') if isinstance(item, dict) else ''
+                                if text:
+                                    raw = text.strip()
+                                    break
+                            if raw and classify_user_message(raw) == 'user':
+                                summary['first_real_user_text'] = raw.replace('\n', ' ')[:160]
+                    elif p_type == 'function_call':
+                        payload_text = ' '.join(
+                            x for x in (
+                                stringify_search_value(payload.get('name', '')),
+                                stringify_search_value(payload.get('arguments', '')),
+                            ) if x
+                        )
+                        search_len = append_search_chunk(search_chunks, payload_text, search_len, SEARCH_INDEX_TEXT_LIMIT)
+                    elif p_type == 'function_call_output':
+                        search_len = append_search_chunk(
+                            search_chunks,
+                            stringify_search_value(payload.get('output', '')),
+                            search_len,
+                            SEARCH_INDEX_TEXT_LIMIT,
+                        )
+                elif t == 'event_msg' and payload.get('type') == 'agent_message':
+                    search_len = append_search_chunk(
+                        search_chunks,
+                        stringify_search_value(payload.get('message', '')),
+                        search_len,
+                        SEARCH_INDEX_TEXT_LIMIT,
+                    )
+
+                if (
+                    SEARCH_INDEX_TEXT_LIMIT > 0
+                    and search_len >= SEARCH_INDEX_TEXT_LIMIT
+                    and summary['started_at']
+                    and summary['first_user_text']
+                    and summary['first_real_user_text']
+                ):
+                    break
+    except Exception:
+        pass
+
+    if not summary['first_real_user_text']:
+        summary['first_real_user_text'] = summary['first_user_text']
+
+    search_prefix = [
+        summary['relative_path'],
+        summary['cwd'],
+        summary['session_id'],
+        summary['source'],
+        summary['first_user_text'],
+        summary['first_real_user_text'],
+    ]
+    normalized_prefix = []
+    for value in search_prefix:
+        normalized = normalize_search_text(value)
+        if normalized:
+            normalized_prefix.append(normalized)
+    search_text = ' '.join(normalized_prefix + search_chunks)
+    return summary, search_text
+
+
+def sync_search_index(paths, prune_missing=True):
+    indexed = []
+    current = {}
+    for path in paths:
+        try:
+            stat_result, signature = get_session_signature(path)
+        except FileNotFoundError:
+            continue
+        path_str = str(path)
+        current[path_str] = (path, stat_result, signature)
+        indexed.append(path)
+
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            rows = conn.execute('SELECT path, mtime_ns, size FROM session_index').fetchall()
+            existing = {row['path']: (row['mtime_ns'], row['size']) for row in rows}
+            stale_paths = [path_str for path_str in existing if path_str not in current] if prune_missing else []
+
+            if stale_paths:
+                with conn:
+                    conn.executemany('DELETE FROM session_index WHERE path = ?', ((path_str,) for path_str in stale_paths))
+
+            changed = []
+            for path_str, item in current.items():
+                _, _, signature = item
+                if existing.get(path_str) != signature:
+                    changed.append(item)
+
+            if changed:
+                with conn:
+                    for path, stat_result, signature in changed:
+                        summary, search_text = build_search_index_record(path, stat_result=stat_result)
+                        conn.execute(
+                            '''
+                            INSERT INTO session_index (
+                                path, id, relative_path, mtime_iso, mtime_ns, size,
+                                session_id, started_at, cwd, model, source,
+                                first_user_text, first_real_user_text, search_text
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(path) DO UPDATE SET
+                                id = excluded.id,
+                                relative_path = excluded.relative_path,
+                                mtime_iso = excluded.mtime_iso,
+                                mtime_ns = excluded.mtime_ns,
+                                size = excluded.size,
+                                session_id = excluded.session_id,
+                                started_at = excluded.started_at,
+                                cwd = excluded.cwd,
+                                model = excluded.model,
+                                source = excluded.source,
+                                first_user_text = excluded.first_user_text,
+                                first_real_user_text = excluded.first_real_user_text,
+                                search_text = excluded.search_text
+                            ''',
+                            (
+                                summary['path'],
+                                summary['id'],
+                                summary['relative_path'],
+                                summary['mtime'],
+                                signature[0],
+                                signature[1],
+                                summary['session_id'],
+                                summary['started_at'],
+                                summary['cwd'],
+                                summary['model'],
+                                summary['source'],
+                                summary['first_user_text'],
+                                summary['first_real_user_text'],
+                                search_text,
+                            ),
+                        )
+                        set_cached_summary(path, signature, summary)
+        finally:
+            conn.close()
+
+    return indexed
+
+
+def fetch_sessions_from_search_index(query: str, mode: str, limit: int):
+    normalized_terms = []
+    for term in query.split():
+        normalized = normalize_search_text(term)
+        if normalized:
+            normalized_terms.append(normalized)
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            columns = (
+                'id, path, relative_path, mtime_iso, session_id, started_at, '
+                'cwd, model, source, first_user_text, first_real_user_text'
+            )
+            if normalized_terms:
+                joiner = ' OR ' if mode == 'or' else ' AND '
+                clause = joiner.join('instr(search_text, ?) > 0' for _ in normalized_terms)
+                sql = (
+                    f'SELECT {columns} FROM session_index '
+                    f'WHERE {clause} ORDER BY mtime_ns DESC LIMIT ?'
+                )
+                params = [*normalized_terms, limit]
+            else:
+                sql = f'SELECT {columns} FROM session_index ORDER BY mtime_ns DESC LIMIT ?'
+                params = [limit]
+            rows = conn.execute(sql, params).fetchall()
+            return [summary_from_index_row(row) for row in rows]
+        finally:
+            conn.close()
+
+
+def fetch_session_summary_from_index(path: Path):
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            row = conn.execute(
+                '''
+                SELECT id, path, relative_path, mtime_iso, session_id, started_at,
+                       cwd, model, source, first_user_text, first_real_user_text
+                FROM session_index
+                WHERE path = ?
+                ''',
+                (str(path),),
+            ).fetchone()
+            if row is None:
+                return None
+            return summary_from_index_row(row)
+        finally:
+            conn.close()
+
+
+def get_session_signature(path: Path, stat_result=None, signature=None):
+    st = stat_result if stat_result is not None else path.stat()
+    sig = signature if signature is not None else (st.st_mtime_ns, st.st_size)
+    return st, sig
+
+
+def build_session_summary(path: Path, stat_result=None):
+    st = stat_result if stat_result is not None else path.stat()
     summary = {
         'id': path.stem,
         'path': str(path),
         'relative_path': str(path),
-        'mtime': datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+        'mtime': datetime.fromtimestamp(st.st_mtime).isoformat(),
         'session_id': '',
         'started_at': '',
         'cwd': '',
@@ -164,11 +520,13 @@ def summarize_session(path: Path):
     search_chunks = []
     search_len = 0
     search_limit = SEARCH_TEXT_LIMIT
+    scanned_lines = 0
     summary['relative_path'] = to_relative_path(path)
 
     try:
         with path.open('r', encoding='utf-8') as f:
             for line in f:
+                scanned_lines += 1
                 obj = json.loads(line)
                 t = obj.get('type')
                 payload = obj.get('payload', {})
@@ -205,11 +563,26 @@ def summarize_session(path: Path):
                 if summary['started_at'] and summary['first_user_text']:
                     if summary['first_real_user_text'] and search_len >= search_limit:
                         break
+                if scanned_lines >= SUMMARY_SCAN_LINE_LIMIT:
+                    break
     except Exception:
         pass
     if not summary['first_real_user_text']:
         summary['first_real_user_text'] = summary['first_user_text']
     summary['search_text'] = ' '.join(search_chunks)
+    return summary
+
+
+def summarize_session(path: Path, stat_result=None, signature=None):
+    st, sig = get_session_signature(path, stat_result, signature)
+    key = str(path)
+    with _SESSION_CACHE_LOCK:
+        entry = _SESSION_CACHE.get(key)
+        if entry and entry.get('signature') == sig and entry.get('summary') is not None:
+            return entry['summary']
+
+    summary = build_session_summary(path, stat_result=st)
+    set_cached_summary(path, sig, summary)
     return summary
 
 
@@ -240,7 +613,7 @@ def classify_user_message(text: str) -> str:
     return 'user'
 
 
-def load_session_events(path: Path):
+def build_session_events(path: Path):
     events = []
     raw_count = 0
     with path.open('r', encoding='utf-8') as f:
@@ -287,6 +660,25 @@ def load_session_events(path: Path):
                 break
 
     return {'events': events, 'raw_line_count': raw_count}
+
+
+def load_session_events(path: Path, stat_result=None, signature=None):
+    _, sig = get_session_signature(path, stat_result, signature)
+    key = str(path)
+    with _SESSION_CACHE_LOCK:
+        entry = _SESSION_CACHE.get(key)
+        if entry and entry.get('signature') == sig and entry.get('events') is not None:
+            return entry['events']
+
+    data = build_session_events(path)
+
+    with _SESSION_CACHE_LOCK:
+        entry = _SESSION_CACHE.get(key)
+        if not entry or entry.get('signature') != sig:
+            entry = {'signature': sig, 'summary': None, 'events': None}
+            _SESSION_CACHE[key] = entry
+        entry['events'] = data
+    return data
 
 
 HTML_PAGE = """<!doctype html>
@@ -676,6 +1068,9 @@ const state = {
 };
 
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
+const SEARCH_DEBOUNCE_MS = 180;
+let loadSessionsTimer = null;
+let loadSessionsRequestSeq = 0;
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -783,9 +1178,32 @@ async function copyResumeCommand(){
   }
 }
 
+function scheduleLoadSessions(){
+  saveFilters();
+  if(loadSessionsTimer){
+    clearTimeout(loadSessionsTimer);
+  }
+  loadSessionsTimer = setTimeout(() => {
+    loadSessionsTimer = null;
+    loadSessions();
+  }, SEARCH_DEBOUNCE_MS);
+}
+
 async function loadSessions(){
-  const r = await fetch('/api/sessions?ts=' + Date.now(), { cache: 'no-store' });
+  saveFilters();
+  const requestId = ++loadSessionsRequestSeq;
+  const params = new URLSearchParams();
+  params.set('ts', Date.now().toString());
+  const q = document.getElementById('q').value.trim();
+  if(q){
+    params.set('q', q);
+    params.set('mode', document.getElementById('mode').value);
+  }
+  const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
   const data = await r.json();
+  if(requestId !== loadSessionsRequestSeq){
+    return;
+  }
   state.sessions = data.sessions;
   document.getElementById('root').textContent = data.root;
   applyFilter();
@@ -854,19 +1272,20 @@ function clearFilters(){
   } catch (e) {
     // Ignore storage delete errors.
   }
-  applyFilter();
+  if(loadSessionsTimer){
+    clearTimeout(loadSessionsTimer);
+    loadSessionsTimer = null;
+  }
+  loadSessions();
 }
 
 function applyFilter(){
   const cwdQ = document.getElementById('cwd_q').value.toLowerCase().trim();
-  const q = document.getElementById('q').value.toLowerCase().trim();
   const sourceFilter = normalizeSourceFilter(document.getElementById('source_filter').value || 'all');
   const fromRaw = document.getElementById('date_from').value;
   const toRaw = document.getElementById('date_to').value;
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
-  const mode = document.getElementById('mode').value;
-  const terms = q.split(/\\s+/).filter(Boolean);
   state.filtered = state.sessions.filter(s => {
     const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
     const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
@@ -886,22 +1305,7 @@ function applyFilter(){
       }
     }
 
-    let keywordMatched = true;
-    if(terms.length > 0){
-      const target = (
-        s.relative_path + ' ' +
-        (s.first_real_user_text || '') + ' ' +
-        (s.first_user_text || '') + ' ' +
-        (s.search_text || '')
-      ).toLowerCase();
-      if(mode === 'or'){
-        keywordMatched = terms.some(t => target.includes(t));
-      } else {
-        keywordMatched = terms.every(t => target.includes(t));
-      }
-    }
-
-    return cwdMatched && sourceMatched && dateMatched && keywordMatched;
+    return cwdMatched && sourceMatched && dateMatched;
   });
   saveFilters();
   renderSessionList();
@@ -1007,10 +1411,16 @@ async function refreshActiveSession(){
 document.getElementById('cwd_q').addEventListener('input', applyFilter);
 document.getElementById('date_from').addEventListener('change', applyFilter);
 document.getElementById('date_to').addEventListener('change', applyFilter);
-document.getElementById('q').addEventListener('input', applyFilter);
-document.getElementById('mode').addEventListener('change', applyFilter);
+document.getElementById('q').addEventListener('input', scheduleLoadSessions);
+document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
-document.getElementById('reload').addEventListener('click', loadSessions);
+document.getElementById('reload').addEventListener('click', () => {
+  if(loadSessionsTimer){
+    clearTimeout(loadSessionsTimer);
+    loadSessionsTimer = null;
+  }
+  loadSessions();
+});
 document.getElementById('clear').addEventListener('click', clearFilters);
 document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
 document.getElementById('only_ai_response').addEventListener('change', renderActiveSession);
@@ -1063,8 +1473,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == '/api/sessions':
             roots = get_session_roots()
-            files = iter_all_session_files(roots)[:MAX_LIST]
-            sessions = [summarize_session(p) for p in files]
+            q = urllib.parse.parse_qs(parsed.query)
+            raw_query = q.get('q', [''])[0].strip()
+            mode = q.get('mode', ['and'])[0].strip().lower()
+            if mode not in ('and', 'or'):
+                mode = 'and'
+            files = iter_all_session_files(roots)
+            sync_search_index(files, prune_missing=True)
+            sessions = fetch_sessions_from_search_index(raw_query, mode, MAX_LIST)
             self._send_json({'root': ' | '.join(str(x) for x in roots), 'sessions': sessions})
             return
 
@@ -1090,8 +1506,10 @@ class Handler(BaseHTTPRequestHandler):
             if not p.exists() or not p.is_file():
                 self._send_json({'error': 'session file not found'}, 404)
                 return
-            session = summarize_session(p)
-            data = load_session_events(p)
+            sync_search_index([p], prune_missing=False)
+            stat_result, signature = get_session_signature(p)
+            session = fetch_session_summary_from_index(p) or summarize_session(p, stat_result=stat_result, signature=signature)
+            data = load_session_events(p, stat_result=stat_result, signature=signature)
             data['session'] = session
             self._send_json(data)
             return
