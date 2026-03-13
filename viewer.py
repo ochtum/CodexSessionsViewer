@@ -19,13 +19,27 @@ MAX_EVENTS = 2000
 SEARCH_TEXT_LIMIT = 50000
 SUMMARY_SCAN_LINE_LIMIT = 400
 SEARCH_INDEX_TEXT_LIMIT = 0
-SEARCH_INDEX_SCHEMA_VERSION = 2
+SEARCH_INDEX_SCHEMA_VERSION = 3
 SEARCH_INDEX_DB_PATH = Path(__file__).resolve().parent / '.cache' / 'search_index.sqlite3'
 _CACHED_SESSIONS_DIR = None
 _CACHED_SESSION_ROOTS = None
 _SESSION_CACHE = {}
 _SESSION_CACHE_LOCK = threading.Lock()
 _SEARCH_INDEX_LOCK = threading.Lock()
+LABEL_COLOR_PRESETS = {
+    'red': '#ef4444',
+    'blue': '#3b82f6',
+    'green': '#22c55e',
+    'yellow': '#eab308',
+    'purple': '#a855f7',
+}
+LABEL_COLOR_FAMILY_LABELS = {
+    'red': '赤系',
+    'blue': '青系',
+    'green': '緑系',
+    'yellow': '黄色系',
+    'purple': '紫系',
+}
 
 
 def is_wsl() -> bool:
@@ -172,6 +186,60 @@ def normalize_search_text(text: str) -> str:
     return re.sub(r'\s+', ' ', text).strip().lower()
 
 
+def is_safe_css_color(value: str) -> bool:
+    candidate = (value or '').strip()
+    if not candidate:
+        return False
+    if len(candidate) > 64:
+        return False
+    if not re.fullmatch(r'[#(),.%/\-\sa-zA-Z0-9]+', candidate):
+        return False
+    if re.fullmatch(r'#[0-9a-fA-F]{3,8}', candidate):
+        return True
+    lowered = candidate.lower()
+    if re.fullmatch(r'rgba?\([^()]+\)', lowered):
+        return True
+    if re.fullmatch(r'oklch\([^()]+\)', lowered):
+        return True
+    return False
+
+
+def normalize_label_color(color_value: str, color_family: str):
+    family = (color_family or '').strip().lower()
+    if family not in LABEL_COLOR_PRESETS:
+        family = ''
+    value = (color_value or '').strip()
+    if value:
+        if not is_safe_css_color(value):
+            raise ValueError('色コードの形式が不正です')
+        return value, family
+    if family:
+        return LABEL_COLOR_PRESETS[family], family
+    raise ValueError('色コードを入力してください')
+
+
+def parse_optional_int(raw):
+    try:
+        if raw is None or raw == '':
+            return None
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_json_body(handler):
+    length = parse_optional_int(handler.headers.get('Content-Length'))
+    if not length or length < 0:
+        return {}
+    raw = handler.rfile.read(length)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode('utf-8'))
+    except Exception:
+        return {}
+
+
 def append_search_chunk(chunks, text: str, current_len: int, limit: int) -> int:
     normalized = normalize_search_text(text)
     unlimited = limit <= 0
@@ -211,13 +279,42 @@ def open_search_index_connection():
         '''
     )
     row = conn.execute("SELECT value FROM app_meta WHERE key = 'schema_version'").fetchone()
-    if row is None or row['value'] != str(SEARCH_INDEX_SCHEMA_VERSION):
+    current_version = parse_optional_int(row['value']) if row is not None else 0
+    if current_version is None:
+        current_version = 0
+    if current_version < 2:
         with conn:
             conn.execute('DROP TABLE IF EXISTS session_index')
-            conn.execute("DELETE FROM app_meta WHERE key = 'schema_version'")
+    if current_version < 3:
+        with conn:
             conn.execute(
-                'INSERT INTO app_meta (key, value) VALUES (?, ?)',
-                ('schema_version', str(SEARCH_INDEX_SCHEMA_VERSION)),
+                '''
+                CREATE TABLE IF NOT EXISTS labels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    color_value TEXT NOT NULL,
+                    color_family TEXT NOT NULL DEFAULT ''
+                )
+                '''
+            )
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS session_label_links (
+                    session_path TEXT NOT NULL,
+                    label_id INTEGER NOT NULL,
+                    PRIMARY KEY (session_path, label_id)
+                )
+                '''
+            )
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS event_label_links (
+                    session_path TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    label_id INTEGER NOT NULL,
+                    PRIMARY KEY (session_path, event_id, label_id)
+                )
+                '''
             )
     conn.execute(
         '''
@@ -240,6 +337,47 @@ def open_search_index_connection():
         '''
     )
     conn.execute('CREATE INDEX IF NOT EXISTS idx_session_index_mtime_ns ON session_index (mtime_ns DESC)')
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS labels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            color_value TEXT NOT NULL,
+            color_family TEXT NOT NULL DEFAULT ''
+        )
+        '''
+    )
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS session_label_links (
+            session_path TEXT NOT NULL,
+            label_id INTEGER NOT NULL,
+            PRIMARY KEY (session_path, label_id)
+        )
+        '''
+    )
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS event_label_links (
+            session_path TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            label_id INTEGER NOT NULL,
+            PRIMARY KEY (session_path, event_id, label_id)
+        )
+        '''
+    )
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_session_label_links_label ON session_label_links (label_id, session_path)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_event_label_links_label ON event_label_links (label_id, session_path)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_event_label_links_session ON event_label_links (session_path, event_id)')
+    if current_version != SEARCH_INDEX_SCHEMA_VERSION:
+        with conn:
+            conn.execute(
+                '''
+                INSERT INTO app_meta (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                ''',
+                ('schema_version', str(SEARCH_INDEX_SCHEMA_VERSION)),
+            )
     return conn
 
 
@@ -388,6 +526,8 @@ def sync_search_index(paths, prune_missing=True):
             if stale_paths:
                 with conn:
                     conn.executemany('DELETE FROM session_index WHERE path = ?', ((path_str,) for path_str in stale_paths))
+                    conn.executemany('DELETE FROM session_label_links WHERE session_path = ?', ((path_str,) for path_str in stale_paths))
+                    conn.executemany('DELETE FROM event_label_links WHERE session_path = ?', ((path_str,) for path_str in stale_paths))
 
             changed = []
             for path_str, item in current.items():
@@ -445,7 +585,7 @@ def sync_search_index(paths, prune_missing=True):
     return indexed
 
 
-def fetch_sessions_from_search_index(query: str, mode: str, limit: int):
+def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_label_id=None, event_label_id=None):
     normalized_terms = []
     for term in query.split():
         normalized = normalize_search_text(term)
@@ -458,19 +598,31 @@ def fetch_sessions_from_search_index(query: str, mode: str, limit: int):
                 'id, path, relative_path, mtime_iso, session_id, started_at, '
                 'cwd, model, source, first_user_text, first_real_user_text'
             )
+            where_clauses = []
+            params = []
             if normalized_terms:
                 joiner = ' OR ' if mode == 'or' else ' AND '
-                clause = joiner.join('instr(search_text, ?) > 0' for _ in normalized_terms)
-                sql = (
-                    f'SELECT {columns} FROM session_index '
-                    f'WHERE {clause} ORDER BY mtime_ns DESC LIMIT ?'
+                where_clauses.append(joiner.join('instr(search_text, ?) > 0' for _ in normalized_terms))
+                params.extend(normalized_terms)
+            if session_label_id is not None:
+                where_clauses.append(
+                    'EXISTS (SELECT 1 FROM session_label_links sl WHERE sl.session_path = session_index.path AND sl.label_id = ?)'
                 )
-                params = [*normalized_terms, limit]
-            else:
-                sql = f'SELECT {columns} FROM session_index ORDER BY mtime_ns DESC LIMIT ?'
-                params = [limit]
+                params.append(session_label_id)
+            if event_label_id is not None:
+                where_clauses.append(
+                    'EXISTS (SELECT 1 FROM event_label_links el WHERE el.session_path = session_index.path AND el.label_id = ?)'
+                )
+                params.append(event_label_id)
+            where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
+            sql = f'SELECT {columns} FROM session_index {where_sql} ORDER BY mtime_ns DESC LIMIT ?'
+            params.append(limit)
             rows = conn.execute(sql, params).fetchall()
-            return [summary_from_index_row(row) for row in rows]
+            sessions = [summary_from_index_row(row) for row in rows]
+            label_map = fetch_session_labels_map([session['path'] for session in sessions], conn)
+            for session in sessions:
+                session['session_labels'] = label_map.get(session['path'], [])
+            return sessions
         finally:
             conn.close()
 
@@ -490,7 +642,176 @@ def fetch_session_summary_from_index(path: Path):
             ).fetchone()
             if row is None:
                 return None
-            return summary_from_index_row(row)
+            summary = summary_from_index_row(row)
+            summary['session_labels'] = fetch_session_labels_map([summary['path']], conn).get(summary['path'], [])
+            return summary
+        finally:
+            conn.close()
+
+
+def label_row_to_dict(row):
+    family = row['color_family'] or ''
+    return {
+        'id': row['id'],
+        'name': row['name'],
+        'color_value': row['color_value'],
+        'color_family': family,
+        'color_family_label': LABEL_COLOR_FAMILY_LABELS.get(family, ''),
+    }
+
+
+def list_labels():
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            rows = conn.execute(
+                'SELECT id, name, color_value, color_family FROM labels ORDER BY name COLLATE NOCASE ASC, id ASC'
+            ).fetchall()
+            return [label_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+
+def save_label(label_id, name: str, color_value: str, color_family: str):
+    clean_name = (name or '').strip()
+    if not clean_name:
+        raise ValueError('ラベル名を入力してください')
+    if len(clean_name) > 60:
+        raise ValueError('ラベル名が長すぎます')
+    normalized_color, normalized_family = normalize_label_color(color_value, color_family)
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            with conn:
+                if label_id is None:
+                    cur = conn.execute(
+                        'INSERT INTO labels (name, color_value, color_family) VALUES (?, ?, ?)',
+                        (clean_name, normalized_color, normalized_family),
+                    )
+                    saved_id = cur.lastrowid
+                else:
+                    conn.execute(
+                        'UPDATE labels SET name = ?, color_value = ?, color_family = ? WHERE id = ?',
+                        (clean_name, normalized_color, normalized_family, label_id),
+                    )
+                    saved_id = label_id
+                row = conn.execute(
+                    'SELECT id, name, color_value, color_family FROM labels WHERE id = ?',
+                    (saved_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError('ラベルが見つかりません')
+                return label_row_to_dict(row)
+        except sqlite3.IntegrityError:
+            raise ValueError('同名のラベルは既に存在します')
+        finally:
+            conn.close()
+
+
+def delete_label(label_id):
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            with conn:
+                conn.execute('DELETE FROM session_label_links WHERE label_id = ?', (label_id,))
+                conn.execute('DELETE FROM event_label_links WHERE label_id = ?', (label_id,))
+                conn.execute('DELETE FROM labels WHERE id = ?', (label_id,))
+        finally:
+            conn.close()
+
+
+def fetch_session_labels_map(paths, conn):
+    unique_paths = [str(path) for path in paths if path]
+    if not unique_paths:
+        return {}
+    placeholders = ', '.join('?' for _ in unique_paths)
+    rows = conn.execute(
+        f'''
+        SELECT sl.session_path, l.id, l.name, l.color_value, l.color_family
+        FROM session_label_links sl
+        JOIN labels l ON l.id = sl.label_id
+        WHERE sl.session_path IN ({placeholders})
+        ORDER BY l.name COLLATE NOCASE ASC, l.id ASC
+        ''',
+        unique_paths,
+    ).fetchall()
+    mapping = {path: [] for path in unique_paths}
+    for row in rows:
+        mapping.setdefault(row['session_path'], []).append(label_row_to_dict(row))
+    return mapping
+
+
+def fetch_event_labels_map(session_path: Path, conn):
+    rows = conn.execute(
+        '''
+        SELECT el.event_id, l.id, l.name, l.color_value, l.color_family
+        FROM event_label_links el
+        JOIN labels l ON l.id = el.label_id
+        WHERE el.session_path = ?
+        ORDER BY l.name COLLATE NOCASE ASC, l.id ASC
+        ''',
+        (str(session_path),),
+    ).fetchall()
+    mapping = {}
+    for row in rows:
+        mapping.setdefault(row['event_id'], []).append(label_row_to_dict(row))
+    return mapping
+
+
+def assign_session_label(path: Path, label_id: int):
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            with conn:
+                conn.execute(
+                    '''
+                    INSERT OR IGNORE INTO session_label_links (session_path, label_id)
+                    SELECT ?, id FROM labels WHERE id = ?
+                    ''',
+                    (str(path), label_id),
+                )
+        finally:
+            conn.close()
+
+
+def remove_session_label(path: Path, label_id: int):
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            with conn:
+                conn.execute(
+                    'DELETE FROM session_label_links WHERE session_path = ? AND label_id = ?',
+                    (str(path), label_id),
+                )
+        finally:
+            conn.close()
+
+
+def assign_event_label(path: Path, event_id: str, label_id: int):
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            with conn:
+                conn.execute(
+                    '''
+                    INSERT OR IGNORE INTO event_label_links (session_path, event_id, label_id)
+                    SELECT ?, ?, id FROM labels WHERE id = ?
+                    ''',
+                    (str(path), event_id, label_id),
+                )
+        finally:
+            conn.close()
+
+
+def remove_event_label(path: Path, event_id: str, label_id: int):
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            with conn:
+                conn.execute(
+                    'DELETE FROM event_label_links WHERE session_path = ? AND event_id = ? AND label_id = ?',
+                    (str(path), event_id, label_id),
+                )
         finally:
             conn.close()
 
@@ -632,9 +953,16 @@ def build_session_events(path: Path):
                     if text:
                         if role == 'user':
                             role = classify_user_message(text)
-                        events.append({'timestamp': ts, 'kind': 'message', 'role': role, 'text': text})
+                        events.append({
+                            'event_id': f'line-{raw_count}',
+                            'timestamp': ts,
+                            'kind': 'message',
+                            'role': role,
+                            'text': text,
+                        })
                 elif p_type == 'function_call':
                     events.append({
+                        'event_id': f'line-{raw_count}',
                         'timestamp': ts,
                         'kind': 'function_call',
                         'name': payload.get('name', ''),
@@ -642,6 +970,7 @@ def build_session_events(path: Path):
                     })
                 elif p_type == 'function_call_output':
                     events.append({
+                        'event_id': f'line-{raw_count}',
                         'timestamp': ts,
                         'kind': 'function_output',
                         'call_id': payload.get('call_id', ''),
@@ -651,6 +980,7 @@ def build_session_events(path: Path):
                 p_type = payload.get('type')
                 if p_type == 'agent_message':
                     events.append({
+                        'event_id': f'line-{raw_count}',
                         'timestamp': ts,
                         'kind': 'agent_update',
                         'text': payload.get('message', ''),
@@ -668,17 +998,31 @@ def load_session_events(path: Path, stat_result=None, signature=None):
     with _SESSION_CACHE_LOCK:
         entry = _SESSION_CACHE.get(key)
         if entry and entry.get('signature') == sig and entry.get('events') is not None:
-            return entry['events']
+            data = entry['events']
+        else:
+            data = None
 
-    data = build_session_events(path)
+    if data is None:
+        data = build_session_events(path)
 
-    with _SESSION_CACHE_LOCK:
-        entry = _SESSION_CACHE.get(key)
-        if not entry or entry.get('signature') != sig:
-            entry = {'signature': sig, 'summary': None, 'events': None}
-            _SESSION_CACHE[key] = entry
-        entry['events'] = data
-    return data
+        with _SESSION_CACHE_LOCK:
+            entry = _SESSION_CACHE.get(key)
+            if not entry or entry.get('signature') != sig:
+                entry = {'signature': sig, 'summary': None, 'events': None}
+                _SESSION_CACHE[key] = entry
+            entry['events'] = data
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            label_map = fetch_event_labels_map(path, conn)
+        finally:
+            conn.close()
+    decorated_events = []
+    for event in data['events']:
+        decorated = dict(event)
+        decorated['labels'] = label_map.get(event.get('event_id', ''), [])
+        decorated_events.append(decorated)
+    return {'events': decorated_events, 'raw_line_count': data['raw_line_count']}
 
 
 HTML_PAGE = """<!doctype html>
@@ -717,6 +1061,17 @@ header {
 }
 header h1 { margin: 0; font-size: 18px; }
 header small { color: var(--muted); }
+.header-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 .container {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -733,10 +1088,25 @@ header small { color: var(--muted); }
 .toolbar {
   padding: 10px;
   border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+}
+.toolbar-fields,
+.toolbar-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+.toolbar-actions {
+  justify-content: flex-start;
+}
+.toolbar.collapsed {
+  grid-template-columns: 1fr;
+}
+.toolbar.collapsed .toolbar-fields,
+.toolbar.collapsed #clear {
+  display: none;
 }
 input, select, button {
   border: 1px solid var(--line);
@@ -752,6 +1122,9 @@ button {
   color: #fff;
   cursor: pointer;
   white-space: nowrap;
+}
+.secondary-button {
+  background: #355c7d;
 }
 #sessions {
   overflow: auto;
@@ -838,6 +1211,12 @@ button {
   color: #0b3a67;
   background: #e6f1ff;
   border-color: #bdd9f7;
+}
+.session-label-row {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .right {
   background: var(--panel);
@@ -929,6 +1308,27 @@ button {
   background: #94a3b8;
   cursor: not-allowed;
 }
+#add_session_label {
+  background: #7c3aed;
+}
+#add_session_label:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+.session-label-strip {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  background: #fcfdff;
+  min-height: 44px;
+}
+.session-label-strip.empty {
+  color: var(--muted);
+  font-size: 12px;
+}
 #events {
   padding: 14px;
   overflow: auto;
@@ -947,11 +1347,29 @@ button {
 .ev.assistant { border-left-color: var(--assistant); background: #e8f8f0; }
 .ev.developer { border-left-color: var(--dev); background: #fff4e2; }
 .ev.system { border-left-color: var(--system); background: #f0f3f7; }
+.ev.label-match {
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
+}
 .ev-head {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   margin-bottom: 8px;
+}
+.event-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.event-label-add-button {
+  background: #7c3aed;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.event-label-add-button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
 }
 .badge {
   font-size: 11px;
@@ -998,6 +1416,69 @@ button {
   background: #e3e9f0;
   border-color: #c0ccd9;
 }
+.data-label-badge {
+  --label-color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--label-color);
+  background: #ffffff;
+  color: #1f2937;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+}
+.data-label-badge .label-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--label-color);
+  flex: 0 0 auto;
+}
+.data-label-badge .label-remove-button {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  padding: 0;
+  line-height: 1;
+  font-size: 12px;
+  cursor: pointer;
+}
+.data-label-badge .label-remove-button:hover {
+  color: #0f172a;
+}
+.label-picker {
+  position: fixed;
+  z-index: 9999;
+  min-width: 220px;
+  max-width: 280px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+.label-picker.hidden {
+  display: none;
+}
+.label-picker-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  background: #ffffff;
+  color: #18232f;
+}
+.label-picker-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 8px;
+}
 pre {
   margin: 0;
   white-space: pre-wrap;
@@ -1021,27 +1502,45 @@ pre {
 </head>
 <body>
 <header>
-  <h1>Codex Sessions Viewer</h1>
-  <small id="root"></small>
+  <div class="header-bar">
+    <div>
+      <h1>Codex Sessions Viewer</h1>
+      <small id="root"></small>
+    </div>
+    <div class="header-actions">
+      <button id="open_label_manager" class="secondary-button">ラベル管理</button>
+    </div>
+  </div>
 </header>
-<div class="container">
+  <div class="container">
   <aside class="left">
     <div class="toolbar">
-      <input id="cwd_q" placeholder="cwd (部分一致)" />
-      <input id="date_from" type="date" />
-      <input id="date_to" type="date" />
-      <input id="q" placeholder="keyword filter" />
-      <select id="mode">
-        <option value="and">keyword AND</option>
-        <option value="or">keyword OR</option>
-      </select>
-      <select id="source_filter">
-        <option value="all">source: all</option>
-        <option value="cli">source: CLI</option>
-        <option value="vscode">source: VS Code</option>
-      </select>
-      <button id="reload">Reload</button>
-      <button id="clear">Clear</button>
+      <div class="toolbar-fields" id="toolbar_fields">
+        <input id="cwd_q" placeholder="cwd (部分一致)" />
+        <input id="date_from" type="date" />
+        <input id="date_to" type="date" />
+        <input id="q" placeholder="keyword filter" />
+        <select id="mode">
+          <option value="and">keyword AND</option>
+          <option value="or">keyword OR</option>
+        </select>
+        <select id="source_filter">
+          <option value="all">source: all</option>
+          <option value="cli">source: CLI</option>
+          <option value="vscode">source: VS Code</option>
+        </select>
+        <select id="session_label_filter">
+          <option value="">session label: all</option>
+        </select>
+        <select id="event_label_filter">
+          <option value="">event label: all</option>
+        </select>
+      </div>
+      <div class="toolbar-actions">
+        <button id="reload">Reload</button>
+        <button id="clear">Clear</button>
+        <button id="toggle_filters" class="secondary-button">Hide</button>
+      </div>
     </div>
     <div id="sessions"></div>
   </aside>
@@ -1051,12 +1550,18 @@ pre {
       <label><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
       <label><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
       <label><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
+      <select id="detail_event_label_filter">
+        <option value="">event label: all</option>
+      </select>
       <button id="refresh_detail" disabled>Refresh</button>
       <button id="copy_resume_command" disabled>セッション再開コマンドコピー</button>
+      <button id="add_session_label" disabled>セッションにラベル追加</button>
     </div>
+    <div class="session-label-strip empty" id="session_label_strip">セッションラベルはまだありません</div>
     <div id="events"></div>
   </main>
 </div>
+<div id="label_picker" class="label-picker hidden"></div>
 <script>
 const state = {
   sessions: [],
@@ -1065,15 +1570,189 @@ const state = {
   activeSession: null,
   activeEvents: [],
   activeRawLineCount: 0,
+  labels: [],
 };
 
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
 const SEARCH_DEBOUNCE_MS = 180;
 let loadSessionsTimer = null;
 let loadSessionsRequestSeq = 0;
+let labelManagerWindow = null;
+let labelPickerHandler = null;
+let filtersVisible = true;
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderColorStyle(colorValue){
+  return `--label-color:${esc(colorValue || '#94a3b8')}`;
+}
+
+function updateFilterVisibility(){
+  const toolbar = document.querySelector('.toolbar');
+  const button = document.getElementById('toggle_filters');
+  if(filtersVisible){
+    toolbar.classList.remove('collapsed');
+    button.textContent = 'Hide';
+  } else {
+    toolbar.classList.add('collapsed');
+    button.textContent = 'Show';
+  }
+}
+
+function setFiltersVisible(nextVisible){
+  filtersVisible = !!nextVisible;
+  updateFilterVisibility();
+}
+
+function postJson(url, payload){
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  }).then(r => r.json());
+}
+
+function getSelectedSessionLabelFilter(){
+  return document.getElementById('session_label_filter').value || '';
+}
+
+function getSelectedListEventLabelFilter(){
+  return document.getElementById('event_label_filter').value || '';
+}
+
+function getSelectedDetailEventLabelFilter(){
+  return document.getElementById('detail_event_label_filter').value || '';
+}
+
+function populateLabelSelect(selectId, allLabel){
+  const select = document.getElementById(selectId);
+  const current = select.value;
+  const options = [`<option value="">${esc(allLabel)}</option>`].concat(
+    state.labels.map(label => `<option value="${esc(label.id)}">${esc(label.name)}</option>`)
+  );
+  select.innerHTML = options.join('');
+  const hasCurrent = state.labels.some(label => String(label.id) === current);
+  select.value = hasCurrent ? current : '';
+}
+
+function populateLabelControls(){
+  populateLabelSelect('session_label_filter', 'session label: all');
+  populateLabelSelect('event_label_filter', 'event label: all');
+  populateLabelSelect('detail_event_label_filter', 'event label: all');
+  ['session_label_filter', 'event_label_filter', 'detail_event_label_filter'].forEach(id => {
+    const select = document.getElementById(id);
+    const pending = select.dataset.pendingValue;
+    if(pending && Array.from(select.options).some(option => option.value === pending)){
+      select.value = pending;
+    }
+    delete select.dataset.pendingValue;
+  });
+  renderSessionList();
+  renderSessionLabelStrip();
+  renderActiveSession();
+  updateSessionLabelButtonState();
+}
+
+function renderAssignedLabels(labels, removeType, extra){
+  if(!Array.isArray(labels) || labels.length === 0) return '';
+  return labels.map(label => {
+    const attrs = removeType ? (
+      ` data-remove-type="${esc(removeType)}"` +
+      ` data-label-id="${esc(label.id)}"` +
+      (extra && extra.eventId ? ` data-event-id="${esc(extra.eventId)}"` : '')
+    ) : '';
+    const removeButton = removeType
+      ? `<button class="label-remove-button" title="ラベル解除"${attrs}>×</button>`
+      : '';
+    return `<span class="data-label-badge" style="${renderColorStyle(label.color_value)}"><span class="label-dot"></span><span>${esc(label.name)}</span>${removeButton}</span>`;
+  }).join('');
+}
+
+function updateSessionLabelButtonState(){
+  const button = document.getElementById('add_session_label');
+  button.disabled = !state.activePath || state.labels.length === 0;
+}
+
+function renderSessionLabelStrip(){
+  const strip = document.getElementById('session_label_strip');
+  if(!state.activeSession){
+    strip.classList.add('empty');
+    strip.textContent = 'セッションラベルはまだありません';
+    updateSessionLabelButtonState();
+    return;
+  }
+  const labels = state.activeSession.session_labels || [];
+  if(!labels.length){
+    strip.classList.add('empty');
+    strip.textContent = 'セッションラベルはまだありません';
+    updateSessionLabelButtonState();
+    return;
+  }
+  strip.classList.remove('empty');
+  strip.innerHTML = renderAssignedLabels(labels, 'session');
+  strip.querySelectorAll('.label-remove-button').forEach(button => {
+    button.onclick = async () => {
+      const labelId = Number(button.dataset.labelId);
+      await removeSessionLabel(labelId);
+    };
+  });
+  updateSessionLabelButtonState();
+}
+
+function hideLabelPicker(){
+  const picker = document.getElementById('label_picker');
+  picker.classList.add('hidden');
+  picker.innerHTML = '';
+  labelPickerHandler = null;
+}
+
+function showLabelPicker(anchor, onSelect){
+  const picker = document.getElementById('label_picker');
+  if(!state.labels.length){
+    alert('ラベルがありません。先にラベル管理から作成してください。');
+    return;
+  }
+  labelPickerHandler = onSelect;
+  picker.innerHTML = state.labels.map(label =>
+    `<button class="label-picker-option" data-label-id="${esc(label.id)}" style="${renderColorStyle(label.color_value)}"><span class="label-dot"></span><span>${esc(label.name)}</span></button>`
+  ).join('');
+  picker.querySelectorAll('.label-picker-option').forEach(button => {
+    button.onclick = async () => {
+      const labelId = Number(button.dataset.labelId);
+      const handler = labelPickerHandler;
+      hideLabelPicker();
+      if(!handler){
+        return;
+      }
+      await handler(labelId);
+    };
+  });
+  const rect = anchor.getBoundingClientRect();
+  picker.style.top = `${Math.round(rect.bottom + 8)}px`;
+  picker.style.left = `${Math.round(Math.min(rect.left, window.innerWidth - 300))}px`;
+  picker.classList.remove('hidden');
+}
+
+async function loadLabels(reloadSessions){
+  const r = await fetch('/api/labels?ts=' + Date.now(), { cache: 'no-store' });
+  const data = await r.json();
+  const prev = JSON.stringify(state.labels);
+  state.labels = data.labels || [];
+  populateLabelControls();
+  if(reloadSessions && prev !== JSON.stringify(state.labels)){
+    await loadSessions();
+  }
+}
+
+function openLabelManagerWindow(){
+  const features = 'width=720,height=680,resizable=yes,scrollbars=yes';
+  if(labelManagerWindow && !labelManagerWindow.closed){
+    labelManagerWindow.focus();
+    return;
+  }
+  labelManagerWindow = window.open('/labels', 'codex_label_manager', features);
 }
 
 function highlightSessionPath(s){
@@ -1199,6 +1878,14 @@ async function loadSessions(){
     params.set('q', q);
     params.set('mode', document.getElementById('mode').value);
   }
+  const sessionLabelId = getSelectedSessionLabelFilter();
+  const eventLabelId = getSelectedListEventLabelFilter();
+  if(sessionLabelId){
+    params.set('session_label_id', sessionLabelId);
+  }
+  if(eventLabelId){
+    params.set('event_label_id', eventLabelId);
+  }
   const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
   const data = await r.json();
   if(requestId !== loadSessionsRequestSeq){
@@ -1230,6 +1917,9 @@ function saveFilters(){
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
+    session_label_filter: getSelectedSessionLabelFilter(),
+    event_label_filter: getSelectedListEventLabelFilter(),
+    detail_event_label_filter: getSelectedDetailEventLabelFilter(),
   };
   try {
     localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
@@ -1255,6 +1945,9 @@ function restoreFilters(){
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
     document.getElementById('source_filter').value = source;
+    if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
+    if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
+    if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
   } catch (e) {
     // Ignore invalid saved filters.
   }
@@ -1267,6 +1960,9 @@ function clearFilters(){
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
+  document.getElementById('session_label_filter').value = '';
+  document.getElementById('event_label_filter').value = '';
+  document.getElementById('detail_event_label_filter').value = '';
   try {
     localStorage.removeItem(FILTER_STORAGE_KEY);
   } catch (e) {
@@ -1321,6 +2017,7 @@ function renderSessionList(){
         <div class="session-badge session-time">${esc(fmt(s.started_at || s.mtime))}</div>
         <div class="session-badge session-source source-${esc(normalizeSource(s.source))}">${esc(sourceLabel(s.source))}</div>
       </div>
+      <div class="session-label-row">${renderAssignedLabels(s.session_labels || [])}</div>
       <div class="session-meta-row">
         <div class="session-badge session-cwd">cwd: ${esc(s.cwd || '-')}</div>
         <div class="session-badge session-id">id: ${esc(s.session_id || s.id || '')}</div>
@@ -1334,6 +2031,10 @@ function renderSessionList(){
 
 function getDisplayEvents(){
   let events = state.activeEvents || [];
+  const selectedEventLabelId = getSelectedDetailEventLabelFilter();
+  if(selectedEventLabelId){
+    events = events.filter(ev => (ev.labels || []).some(label => String(label.id) === selectedEventLabelId));
+  }
   const showOnlyUser = document.getElementById('only_user_instruction').checked;
   const showOnlyAssistant = document.getElementById('only_ai_response').checked;
   if(showOnlyUser || showOnlyAssistant){
@@ -1348,6 +2049,64 @@ function getDisplayEvents(){
   return events;
 }
 
+async function removeSessionLabel(labelId){
+  if(!state.activePath) return;
+  const data = await postJson('/api/session-label/remove', {
+    path: state.activePath,
+    label_id: labelId,
+  });
+  if(data.error){
+    alert(data.error);
+    return;
+  }
+  await loadSessions();
+}
+
+async function addSessionLabelFromButton(button){
+  if(!state.activePath) return;
+  showLabelPicker(button, async (labelId) => {
+    const data = await postJson('/api/session-label/add', {
+      path: state.activePath,
+      label_id: labelId,
+    });
+    if(data.error){
+      alert(data.error);
+      return;
+    }
+    await loadSessions();
+  });
+}
+
+async function addEventLabelFromButton(button, eventId){
+  if(!state.activePath || !eventId) return;
+  showLabelPicker(button, async (labelId) => {
+    const data = await postJson('/api/event-label/add', {
+      path: state.activePath,
+      event_id: eventId,
+      label_id: labelId,
+    });
+    if(data.error){
+      alert(data.error);
+      return;
+    }
+    await loadSessions();
+  });
+}
+
+async function removeEventLabel(eventId, labelId){
+  if(!state.activePath || !eventId) return;
+  const data = await postJson('/api/event-label/remove', {
+    path: state.activePath,
+    event_id: eventId,
+    label_id: labelId,
+  });
+  if(data.error){
+    alert(data.error);
+    return;
+  }
+  await loadSessions();
+}
+
 function renderActiveSession(){
   const meta = document.getElementById('meta');
   const eventsBox = document.getElementById('events');
@@ -1356,17 +2115,22 @@ function renderActiveSession(){
     meta.textContent = 'セッションを選択してください';
     eventsBox.innerHTML = '';
     updateCopyResumeButtonState();
+    renderSessionLabelStrip();
+    updateSessionLabelButtonState();
     return;
   }
 
   const displayEvents = getDisplayEvents();
   const source = normalizeSource(state.activeSession.source);
+  const selectedEventLabelId = getSelectedDetailEventLabelFilter();
   meta.innerHTML =
     `path: <code class="path-code">${highlightSessionPath(state.activeSession.relative_path)}</code> | cwd: <code class="cwd-code">${esc(state.activeSession.cwd || '-')}</code> | time: <code class="time-code">${esc(fmt(state.activeSession.started_at || state.activeSession.mtime))}</code> | source: <code class="source-code source-${esc(source)}">${esc(sourceLabel(source))}</code> | events: ${displayEvents.length}/${state.activeEvents.length} | raw lines: ${state.activeRawLineCount}`;
 
   eventsBox.innerHTML = displayEvents.map(ev => {
     const role = ev.role || 'system';
     const roleLabel = role.replace('_', ' ');
+    const labels = ev.labels || [];
+    const matchesSelectedLabel = selectedEventLabelId && labels.some(label => String(label.id) === selectedEventLabelId);
     let body = '';
     if(ev.kind === 'message' || ev.kind === 'agent_update'){
       body = `<pre>${esc(ev.text || '')}</pre>`;
@@ -1377,8 +2141,21 @@ function renderActiveSession(){
     } else {
       body = `<pre>${esc(JSON.stringify(ev, null, 2))}</pre>`;
     }
-    return `<div class="ev ${role}"><div class="ev-head"><span class="badge badge-kind">${esc(ev.kind || 'event')}</span><span class="badge badge-role">${esc(roleLabel)}</span><span class="badge badge-time">${esc(fmt(ev.timestamp))}</span></div>${body}</div>`;
+    const labelsHtml = renderAssignedLabels(labels, 'event', { eventId: ev.event_id });
+    return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''}"><div class="ev-head"><span class="badge badge-kind">${esc(ev.kind || 'event')}</span><span class="badge badge-role">${esc(roleLabel)}</span><span class="badge badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>ラベル追加</button></span></div>${body}</div>`;
   }).join('');
+  renderSessionLabelStrip();
+  updateSessionLabelButtonState();
+  eventsBox.querySelectorAll('.event-label-add-button').forEach(button => {
+    button.onclick = async () => {
+      await addEventLabelFromButton(button, button.dataset.eventId);
+    };
+  });
+  eventsBox.querySelectorAll('.label-remove-button[data-remove-type="event"]').forEach(button => {
+    button.onclick = async () => {
+      await removeEventLabel(button.dataset.eventId, Number(button.dataset.labelId));
+    };
+  });
   updateCopyResumeButtonState();
 }
 
@@ -1395,6 +2172,8 @@ async function openSession(path){
     document.getElementById('events').innerHTML = '';
     updateRefreshDetailButtonState();
     updateCopyResumeButtonState();
+    renderSessionLabelStrip();
+    updateSessionLabelButtonState();
     return;
   }
   state.activeSession = data.session;
@@ -1414,6 +2193,15 @@ document.getElementById('date_to').addEventListener('change', applyFilter);
 document.getElementById('q').addEventListener('input', scheduleLoadSessions);
 document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
+document.getElementById('session_label_filter').addEventListener('change', scheduleLoadSessions);
+document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
+document.getElementById('detail_event_label_filter').addEventListener('change', () => {
+  saveFilters();
+  renderActiveSession();
+});
+document.getElementById('toggle_filters').addEventListener('click', () => {
+  setFiltersVisible(!filtersVisible);
+});
 document.getElementById('reload').addEventListener('click', () => {
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
@@ -1427,14 +2215,785 @@ document.getElementById('only_ai_response').addEventListener('change', renderAct
 document.getElementById('reverse_order').addEventListener('change', renderActiveSession);
 document.getElementById('refresh_detail').addEventListener('click', refreshActiveSession);
 document.getElementById('copy_resume_command').addEventListener('click', copyResumeCommand);
+document.getElementById('add_session_label').addEventListener('click', async (event) => {
+  await addSessionLabelFromButton(event.currentTarget);
+});
+document.getElementById('open_label_manager').addEventListener('click', openLabelManagerWindow);
+document.addEventListener('click', (event) => {
+  const picker = document.getElementById('label_picker');
+  if(picker.classList.contains('hidden')) return;
+  if(picker.contains(event.target)) return;
+  if(event.target.closest('.event-label-add-button')) return;
+  if(event.target.closest('#add_session_label')) return;
+  hideLabelPicker();
+});
+window.addEventListener('message', async (event) => {
+  if(!event.data || event.data.type !== 'labels-updated') return;
+  await loadLabels(false);
+  await loadSessions();
+});
+window.addEventListener('focus', async () => {
+  await loadLabels(false);
+  await loadSessions();
+});
 updateCopyResumeButtonState();
 updateRefreshDetailButtonState();
+updateFilterVisibility();
 restoreFilters();
-loadSessions();
+loadLabels(false).then(() => loadSessions());
 </script>
 </body>
 </html>
 """
+
+LABELS_PAGE = """<!doctype html>
+<html lang=\"ja\">
+<head>
+<meta charset=\"utf-8\" />
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+<title>ラベル管理</title>
+<style>
+:root {
+  --bg: #f5f8ff;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --line: rgba(148, 163, 184, 0.28);
+  --line-strong: rgba(148, 163, 184, 0.52);
+  --text: #0f172a;
+  --muted: #546277;
+  --accent: #0f766e;
+  --accent-strong: #0b5c57;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --danger: #be123c;
+  --shadow: 0 28px 70px rgba(15, 23, 42, 0.14);
+  --shadow-soft: 0 16px 36px rgba(15, 23, 42, 0.1);
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  margin: 0;
+  position: relative;
+  overflow-x: hidden;
+  font-family: "Aptos", "Segoe UI", "Yu Gothic UI", sans-serif;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(59, 130, 246, 0.18), transparent 24%),
+    radial-gradient(circle at 88% 14%, rgba(15, 118, 110, 0.16), transparent 22%),
+    linear-gradient(180deg, #eef6ff 0%, #f8fbff 54%, #eef4fb 100%);
+  color: var(--text);
+}
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  width: 320px;
+  height: 320px;
+  border-radius: 999px;
+  filter: blur(36px);
+  pointer-events: none;
+  opacity: 0.55;
+}
+body::before {
+  top: -120px;
+  left: -90px;
+  background: rgba(96, 165, 250, 0.22);
+}
+body::after {
+  right: -120px;
+  bottom: -140px;
+  background: rgba(16, 185, 129, 0.18);
+}
+.page {
+  position: relative;
+  z-index: 1;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 20px 52px;
+}
+.page-header {
+  margin-bottom: 20px;
+}
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.72);
+  color: #0f5a73;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+.hero-title {
+  margin: 14px 0 0;
+  font-size: 38px;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+.hero-copy {
+  margin-top: 12px;
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+.panel {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 28px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 110px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.42), transparent);
+  pointer-events: none;
+}
+.panel + .panel {
+  margin-top: 20px;
+}
+.editor-panel {
+  padding: 20px 20px 18px;
+}
+.list-panel {
+  padding: 18px 18px 12px;
+}
+.panel-head,
+.list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.editor-panel .panel-head {
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.editor-panel .panel-title {
+  margin-top: 4px;
+  font-size: 22px;
+}
+.editor-panel .panel-copy {
+  margin-top: 4px;
+  max-width: 520px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.editor-panel .panel-chip {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.list-head {
+  align-items: center;
+  margin-bottom: 10px;
+}
+.list-head > div:first-child {
+  min-width: 0;
+}
+.list-head .panel-title {
+  margin-top: 4px;
+  font-size: 22px;
+}
+.list-head .panel-chip {
+  padding: 6px 10px;
+  font-size: 11px;
+  align-self: center;
+}
+.panel-kicker {
+  color: #0f5a73;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.panel-title {
+  margin-top: 8px;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+.panel-copy,
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.panel-chip {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1.1fr auto;
+  gap: 14px;
+  align-items: end;
+}
+.editor-panel .form-grid {
+  gap: 10px;
+}
+label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+input, button {
+  font-family: inherit;
+  font-size: 14px;
+}
+input {
+  min-height: 48px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+input::placeholder {
+  color: #94a3b8;
+}
+input:focus {
+  outline: none;
+  border-color: rgba(15, 118, 110, 0.5);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 16px;
+  padding: 0 20px;
+  background: linear-gradient(135deg, var(--accent) 0%, #16938a 100%);
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 16px 30px rgba(15, 118, 110, 0.22);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px rgba(15, 118, 110, 0.24);
+}
+button:active {
+  transform: translateY(0);
+}
+.secondary {
+  background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+  box-shadow: 0 14px 26px rgba(71, 85, 105, 0.2);
+}
+.danger {
+  background: linear-gradient(135deg, var(--danger) 0%, #e11d48 100%);
+  box-shadow: 0 14px 26px rgba(190, 18, 60, 0.2);
+}
+.preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.preset-field {
+  display: grid;
+  gap: 8px;
+  align-self: stretch;
+}
+.preset-field-title {
+  font-size: 12px;
+  color: #475569;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.badge {
+  --label-color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+.preset-list.inline {
+  margin-top: 0;
+}
+.preset-badge {
+  min-height: 28px;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  padding: 0 8px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.preset-badge.active {
+  border-color: var(--label-color);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1), 0 10px 18px rgba(15, 23, 42, 0.06);
+}
+.preset-badge .dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: none;
+}
+.badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--label-color);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+.label-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 0 22px 0 8px;
+}
+.label-row {
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 18px;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.92));
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.label-row:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12);
+}
+.label-main {
+  display: block;
+  min-width: 0;
+}
+.label-topline {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.label-badge {
+  width: fit-content;
+  max-width: 100%;
+  color: #1e293b;
+  background: #ffffff;
+  border-color: var(--label-color);
+  padding: 6px 10px 6px 9px;
+  font-size: 13px;
+}
+.label-badge .dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  box-shadow: none;
+  opacity: 1;
+  filter: none;
+}
+.label-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 4px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.label-meta-prefix {
+  color: #64748b;
+  font-size: 12px;
+}
+.label-code {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  margin-left: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(238, 246, 255, 0.9);
+  color: #0f3d57;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+.label-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+.label-row-actions button {
+  min-height: 34px;
+  border-radius: 12px;
+  padding: 0 12px;
+  font-size: 12px;
+  box-shadow: none;
+}
+.label-row-actions button:hover {
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.dialog-backdrop.hidden {
+  display: none;
+}
+.dialog {
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  width: min(420px, 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 251, 255, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 26px;
+  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.28);
+  padding: 24px;
+}
+.dialog::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 6px;
+  background: linear-gradient(90deg, #fb7185 0%, #f59e0b 52%, #22c55e 100%);
+}
+.dialog-kicker {
+  color: #be123c;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.dialog-title {
+  margin: 8px 0 0;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+.dialog-message {
+  margin-top: 12px;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dialog-actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+.empty-state {
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 22px;
+  padding: 26px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.56);
+  color: var(--muted);
+}
+@media (max-width: 760px) {
+  .page {
+    padding: 28px 16px 40px;
+  }
+  .hero-title {
+    font-size: 32px;
+  }
+  .panel {
+    padding: 20px;
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .panel-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .label-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  .label-row-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-header">
+    <div class="eyebrow">Codex Sessions Viewer</div>
+    <h1 class="hero-title">ラベル管理</h1>
+    <div class="hero-copy">セッションとイベントに共通で使うラベルをここで整えます。色コードを直接入力するか、プリセットをクリックして素早く設定できます。</div>
+  </div>
+  <div class="panel editor-panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker">Label Editor</div>
+        <div class="panel-title">新規作成 / 編集</div>
+        <div class="panel-copy">保存すると一覧フィルタと詳細画面の両方にすぐ反映されます。</div>
+      </div>
+      <div class="panel-chip">即時反映</div>
+    </div>
+    <div class="form-grid">
+      <label>
+        ラベル名
+        <input id="label_name" placeholder="例: README / 画像 / 再確認" />
+      </label>
+      <label>
+        色コード
+        <input id="label_color" placeholder="#3b82f6 / rgb(...) / oklch(...)" />
+      </label>
+      <div class="preset-field">
+        <div class="preset-field-title">色プリセット</div>
+        <div class="preset-list inline" id="preset_preview"></div>
+      </div>
+      <button id="save_label">保存</button>
+    </div>
+    <input id="label_id" type="hidden" />
+    <input id="label_family" type="hidden" />
+  </div>
+
+  <div class="panel list-panel">
+    <div class="list-head">
+      <div>
+        <div class="panel-kicker">Registered Labels</div>
+        <div class="panel-title">既存ラベル</div>
+      </div>
+      <div class="panel-chip" id="label_count_badge">0 labels</div>
+    </div>
+    <div class="label-list" id="label_list"></div>
+  </div>
+</div>
+<div id="error_dialog" class="dialog-backdrop hidden">
+  <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="error_dialog_title">
+    <div class="dialog-kicker" id="error_dialog_kicker">入力チェック</div>
+    <h2 class="dialog-title" id="error_dialog_title">入力エラー</h2>
+    <div class="dialog-message" id="error_dialog_message"></div>
+    <div class="dialog-actions">
+      <button id="error_dialog_close" type="button">閉じる</button>
+    </div>
+  </div>
+</div>
+<script>
+const PRESETS = {
+  red: { label: '赤系', color: '#ef4444' },
+  blue: { label: '青系', color: '#3b82f6' },
+  green: { label: '緑系', color: '#22c55e' },
+  yellow: { label: '黄色系', color: '#eab308' },
+  purple: { label: '紫系', color: '#a855f7' },
+};
+
+function esc(s){
+  return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function badgeHtml(label){
+  return `<span class="badge label-badge" style="--label-color:${esc(label.color_value)}"><span class="dot"></span><span>${esc(label.name)}</span></span>`;
+}
+
+function showErrorDialog(message, title){
+  document.getElementById('error_dialog_title').textContent = title || '入力エラー';
+  document.getElementById('error_dialog_kicker').textContent = title === 'エラー' ? 'エラーメッセージ' : '入力チェック';
+  document.getElementById('error_dialog_message').textContent = message || '';
+  document.getElementById('error_dialog').classList.remove('hidden');
+}
+
+function hideErrorDialog(){
+  document.getElementById('error_dialog').classList.add('hidden');
+}
+
+function notifyParent(){
+  if(window.opener && !window.opener.closed){
+    window.opener.postMessage({ type: 'labels-updated' }, '*');
+  }
+}
+
+async function postJson(url, payload){
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  return r.json();
+}
+
+function renderPresetPreview(){
+  const box = document.getElementById('preset_preview');
+  const selectedFamily = document.getElementById('label_family').value || '';
+  box.innerHTML = Object.entries(PRESETS).map(([key, value]) =>
+    `<button type="button" class="badge preset-badge ${selectedFamily === key ? 'active' : ''}" data-family="${esc(key)}" data-color="${esc(value.color)}" style="--label-color:${esc(value.color)}"><span class="dot"></span><span>${esc(value.label)}</span></button>`
+  ).join('');
+  box.querySelectorAll('.preset-badge').forEach(button => {
+    button.onclick = () => {
+      document.getElementById('label_color').value = button.dataset.color || '';
+      document.getElementById('label_family').value = button.dataset.family || '';
+      renderPresetPreview();
+    };
+  });
+}
+
+function resetForm(){
+  document.getElementById('label_id').value = '';
+  document.getElementById('label_name').value = '';
+  document.getElementById('label_color').value = '';
+  document.getElementById('label_family').value = '';
+  renderPresetPreview();
+}
+
+function editLabel(label){
+  document.getElementById('label_id').value = label.id;
+  document.getElementById('label_name').value = label.name;
+  document.getElementById('label_color').value = label.color_value;
+  document.getElementById('label_family').value = label.color_family || '';
+  renderPresetPreview();
+}
+
+async function deleteLabel(id){
+  if(!confirm('このラベルを削除しますか？')) return;
+  const data = await postJson('/api/labels/delete', { id });
+  if(data.error){
+    showErrorDialog(data.error, 'エラー');
+    return;
+  }
+  notifyParent();
+  await loadLabels();
+  resetForm();
+}
+
+async function loadLabels(){
+  const r = await fetch('/api/labels?ts=' + Date.now(), { cache: 'no-store' });
+  const data = await r.json();
+  const list = document.getElementById('label_list');
+  const countBadge = document.getElementById('label_count_badge');
+  const count = (data.labels || []).length;
+  countBadge.textContent = `${count} label${count === 1 ? '' : 's'}`;
+  if(!data.labels || !data.labels.length){
+    list.innerHTML = '<div class="empty-state">ラベルはまだありません。上のフォームから最初のラベルを作成してください。</div>';
+    return;
+  }
+  list.innerHTML = data.labels.map(label => `
+    <div class="label-row">
+      <div class="label-main">
+        <div class="label-topline">
+          ${badgeHtml(label)}
+          <div class="label-meta"><span class="label-meta-prefix">color</span><span class="label-code">${esc(label.color_value)}</span>${label.color_family_label ? ' / ' + esc(label.color_family_label) : ''}</div>
+        </div>
+      </div>
+      <div class="label-row-actions">
+        <button class="secondary edit-label" data-label-id="${esc(label.id)}">編集</button>
+        <button class="danger delete-label" data-label-id="${esc(label.id)}">削除</button>
+      </div>
+    </div>
+  `).join('');
+  list.querySelectorAll('.edit-label').forEach(button => {
+    button.onclick = () => {
+      const label = data.labels.find(item => String(item.id) === button.dataset.labelId);
+      if(label) editLabel(label);
+    };
+  });
+  list.querySelectorAll('.delete-label').forEach(button => {
+    button.onclick = async () => {
+      await deleteLabel(Number(button.dataset.labelId));
+    };
+  });
+}
+
+document.getElementById('save_label').addEventListener('click', async () => {
+  const payload = {
+    id: document.getElementById('label_id').value || null,
+    name: document.getElementById('label_name').value,
+    color_value: document.getElementById('label_color').value,
+    color_family: document.getElementById('label_family').value,
+  };
+  const data = await postJson('/api/labels/save', payload);
+  if(data.error){
+    showErrorDialog(data.error, '入力エラー');
+    return;
+  }
+  notifyParent();
+  await loadLabels();
+  resetForm();
+});
+
+document.getElementById('error_dialog_close').addEventListener('click', hideErrorDialog);
+document.getElementById('error_dialog').addEventListener('click', (event) => {
+  if(event.target.id === 'error_dialog'){
+    hideErrorDialog();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if(event.key === 'Escape'){
+    hideErrorDialog();
+  }
+});
+document.getElementById('label_color').addEventListener('input', () => {
+  const color = document.getElementById('label_color').value.trim().toLowerCase();
+  const matched = Object.entries(PRESETS).find(([, value]) => value.color.toLowerCase() === color);
+  document.getElementById('label_family').value = matched ? matched[0] : '';
+  renderPresetPreview();
+});
+renderPresetPreview();
+loadLabels();
+</script>
+</body>
+</html>
+"""
+
+
+def resolve_session_path(raw_path: str):
+    roots = [x.resolve() for x in get_session_roots()]
+    if not raw_path:
+        raise ValueError('path is required')
+    p = Path(raw_path).expanduser().resolve()
+    is_under_known_root = False
+    for root in roots:
+        try:
+            p.relative_to(root)
+            is_under_known_root = True
+            break
+        except Exception:
+            continue
+    if not is_under_known_root:
+        raise ValueError('path is outside sessions dir')
+    return p
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1471,37 +3030,42 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(HTML_PAGE)
             return
 
+        if parsed.path == '/labels':
+            self._send_html(LABELS_PAGE)
+            return
+
+        if parsed.path == '/api/labels':
+            self._send_json({'labels': list_labels()})
+            return
+
         if parsed.path == '/api/sessions':
             roots = get_session_roots()
             q = urllib.parse.parse_qs(parsed.query)
             raw_query = q.get('q', [''])[0].strip()
             mode = q.get('mode', ['and'])[0].strip().lower()
+            session_label_id = parse_optional_int(q.get('session_label_id', [''])[0])
+            event_label_id = parse_optional_int(q.get('event_label_id', [''])[0])
             if mode not in ('and', 'or'):
                 mode = 'and'
             files = iter_all_session_files(roots)
             sync_search_index(files, prune_missing=True)
-            sessions = fetch_sessions_from_search_index(raw_query, mode, MAX_LIST)
+            sessions = fetch_sessions_from_search_index(
+                raw_query,
+                mode,
+                MAX_LIST,
+                session_label_id=session_label_id,
+                event_label_id=event_label_id,
+            )
             self._send_json({'root': ' | '.join(str(x) for x in roots), 'sessions': sessions})
             return
 
         if parsed.path == '/api/session':
-            roots = [x.resolve() for x in get_session_roots()]
             q = urllib.parse.parse_qs(parsed.query)
             raw_path = q.get('path', [''])[0]
-            if not raw_path:
-                self._send_json({'error': 'path is required'}, 400)
-                return
-            p = Path(raw_path).expanduser().resolve()
-            is_under_known_root = False
-            for root in roots:
-                try:
-                    p.relative_to(root)
-                    is_under_known_root = True
-                    break
-                except Exception:
-                    continue
-            if not is_under_known_root:
-                self._send_json({'error': 'path is outside sessions dir'}, 400)
+            try:
+                p = resolve_session_path(raw_path)
+            except ValueError as e:
+                self._send_json({'error': str(e)}, 400)
                 return
             if not p.exists() or not p.is_file():
                 self._send_json({'error': 'session file not found'}, 404)
@@ -1509,12 +3073,86 @@ class Handler(BaseHTTPRequestHandler):
             sync_search_index([p], prune_missing=False)
             stat_result, signature = get_session_signature(p)
             session = fetch_session_summary_from_index(p) or summarize_session(p, stat_result=stat_result, signature=signature)
+            if 'session_labels' not in session:
+                with _SEARCH_INDEX_LOCK:
+                    conn = open_search_index_connection()
+                    try:
+                        session['session_labels'] = fetch_session_labels_map([session['path']], conn).get(session['path'], [])
+                    finally:
+                        conn.close()
             data = load_session_events(p, stat_result=stat_result, signature=signature)
             data['session'] = session
             self._send_json(data)
             return
 
         self._send_html('<h1>404</h1>', 404)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        body = parse_json_body(self)
+
+        try:
+            if parsed.path == '/api/labels/save':
+                label_id = parse_optional_int(body.get('id'))
+                label = save_label(label_id, body.get('name', ''), body.get('color_value', ''), body.get('color_family', ''))
+                self._send_json({'label': label})
+                return
+
+            if parsed.path == '/api/labels/delete':
+                label_id = parse_optional_int(body.get('id'))
+                if label_id is None:
+                    self._send_json({'error': 'label id is required'}, 400)
+                    return
+                delete_label(label_id)
+                self._send_json({'ok': True})
+                return
+
+            if parsed.path == '/api/session-label/add':
+                path = resolve_session_path(body.get('path', ''))
+                label_id = parse_optional_int(body.get('label_id'))
+                if label_id is None:
+                    self._send_json({'error': 'label id is required'}, 400)
+                    return
+                assign_session_label(path, label_id)
+                self._send_json({'ok': True})
+                return
+
+            if parsed.path == '/api/session-label/remove':
+                path = resolve_session_path(body.get('path', ''))
+                label_id = parse_optional_int(body.get('label_id'))
+                if label_id is None:
+                    self._send_json({'error': 'label id is required'}, 400)
+                    return
+                remove_session_label(path, label_id)
+                self._send_json({'ok': True})
+                return
+
+            if parsed.path == '/api/event-label/add':
+                path = resolve_session_path(body.get('path', ''))
+                label_id = parse_optional_int(body.get('label_id'))
+                event_id = (body.get('event_id', '') or '').strip()
+                if label_id is None or not event_id:
+                    self._send_json({'error': 'label id and event id are required'}, 400)
+                    return
+                assign_event_label(path, event_id, label_id)
+                self._send_json({'ok': True})
+                return
+
+            if parsed.path == '/api/event-label/remove':
+                path = resolve_session_path(body.get('path', ''))
+                label_id = parse_optional_int(body.get('label_id'))
+                event_id = (body.get('event_id', '') or '').strip()
+                if label_id is None or not event_id:
+                    self._send_json({'error': 'label id and event id are required'}, 400)
+                    return
+                remove_event_label(path, event_id, label_id)
+                self._send_json({'ok': True})
+                return
+        except ValueError as e:
+            self._send_json({'error': str(e)}, 400)
+            return
+
+        self._send_json({'error': 'not found'}, 404)
 
 
 def main():
