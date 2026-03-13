@@ -1123,6 +1123,17 @@ button {
   cursor: pointer;
   white-space: nowrap;
 }
+#reload {
+  background: #0f766e;
+}
+#clear {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #94a3b8;
+}
+#clear:hover {
+  background: #eef2f7;
+}
 .secondary-button {
   background: #355c7d;
 }
@@ -1352,8 +1363,11 @@ button {
 }
 .ev-head {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
   margin-bottom: 8px;
 }
 .event-actions {
@@ -1371,50 +1385,51 @@ button {
   background: #94a3b8;
   cursor: not-allowed;
 }
-.badge {
-  font-size: 11px;
-  line-height: 1;
+.badge-kind,
+.badge-role,
+.badge-time {
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
+  padding: 2px 8px;
   border: 1px solid transparent;
-  padding: 4px 7px;
   font-weight: 700;
-  letter-spacing: 0.01em;
 }
 .badge-kind {
-  color: #1f2937;
-  background: #eef2f7;
-  border-color: #d4dce6;
+  color: #334155;
+  background: #edf2f7;
+  border-color: #d4dde8;
 }
 .badge-time {
-  color: #364152;
-  background: #f8fafc;
-  border-color: #dfe7f0;
+  color: #5a6673;
+  background: #f6f8fb;
+  border-color: #dce4ee;
   font-variant-numeric: tabular-nums;
 }
-.ev.user .badge-role {
-  color: #0a3b96;
-  background: #d7e8ff;
-  border-color: #9dc3ff;
+.badge-role.user {
+  color: #0f4fbe;
+  background: #dbeafe;
+  border-color: #b6d3ff;
 }
-.ev.user_context .badge-role {
+.badge-role.user_context {
   color: #334155;
   background: #e5e9ef;
   border-color: #c7d0da;
 }
-.ev.assistant .badge-role {
-  color: #0c5f3c;
-  background: #d7f3e4;
-  border-color: #99ddba;
+.badge-role.assistant {
+  color: #0b6a41;
+  background: #d8f4e3;
+  border-color: #a8debe;
 }
-.ev.developer .badge-role {
+.badge-role.developer {
   color: #7a4b00;
   background: #ffe7bf;
   border-color: #f4c97f;
 }
-.ev.system .badge-role {
-  color: #374151;
-  background: #e3e9f0;
-  border-color: #c0ccd9;
+.badge-role.system {
+  color: #44505d;
+  background: #e8edf3;
+  border-color: #ccd8e4;
 }
 .data-label-badge {
   --label-color: #94a3b8;
@@ -2142,7 +2157,7 @@ function renderActiveSession(){
       body = `<pre>${esc(JSON.stringify(ev, null, 2))}</pre>`;
     }
     const labelsHtml = renderAssignedLabels(labels, 'event', { eventId: ev.event_id });
-    return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''}"><div class="ev-head"><span class="badge badge-kind">${esc(ev.kind || 'event')}</span><span class="badge badge-role">${esc(roleLabel)}</span><span class="badge badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>ラベル追加</button></span></div>${body}</div>`;
+    return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''}"><div class="ev-head"><span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>ラベル追加</button></span></div>${body}</div>`;
   }).join('');
   renderSessionLabelStrip();
   updateSessionLabelButtonState();
