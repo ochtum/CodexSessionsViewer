@@ -1043,6 +1043,8 @@ HTML_PAGE = """<!doctype html>
   --assistant: #0f7c4f;
   --dev: #8a5a00;
   --system: #4b5563;
+  --sidebar-width: 360px;
+  --splitter-width: 18px;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -1072,18 +1074,73 @@ header small { color: var(--muted); }
   gap: 8px;
   align-items: center;
 }
+#toggle_session_list_mobile {
+  display: none;
+}
 .container {
-  display: grid;
-  grid-template-columns: 360px 1fr;
+  position: relative;
   height: calc(100vh - 64px);
   overflow: hidden;
 }
 .left {
-  border-right: 1px solid var(--line);
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
   background: #f9fcff;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  transition: transform 0.16s ease, opacity 0.12s ease;
+  will-change: transform;
+}
+.container.sidebar-collapsed .left {
+  transform: translateX(calc(var(--sidebar-width) * -1));
+  opacity: 0;
+  pointer-events: none;
+}
+.splitter {
+  position: absolute;
+  top: 0;
+  left: var(--sidebar-width);
+  bottom: 0;
+  width: var(--splitter-width);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #f7fbff 0%, #edf3fa 100%);
+  border-left: 1px solid #dbe5ef;
+  border-right: 1px solid #dbe5ef;
+}
+.container.sidebar-collapsed .splitter {
+  left: 0;
+}
+.splitter-button {
+  --button-shadow: rgba(71, 85, 105, 0.08);
+  width: 14px;
+  min-width: 14px;
+  height: 52px;
+  padding: 0;
+  border-radius: 999px;
+  border-color: #b8c7d8;
+  background: #ffffff;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+.right {
+  height: 100%;
+  margin-left: calc(var(--sidebar-width) + var(--splitter-width));
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.container.sidebar-collapsed .right {
+  margin-left: var(--splitter-width);
 }
 .toolbar {
   padding: 10px;
@@ -1118,15 +1175,38 @@ input, select, button {
 #date_from, #date_to { flex: 1 1 185px; }
 #mode { flex: 0 0 auto; }
 button {
+  --button-shadow: rgba(13, 109, 119, 0.12);
   background: var(--accent);
   color: #fff;
   cursor: pointer;
   white-space: nowrap;
+  box-shadow: 0 4px 12px var(--button-shadow);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease, opacity 0.18s ease;
+}
+button:hover:not(:disabled):not(.label-remove-button) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px var(--button-shadow);
+  filter: saturate(1.03);
+}
+button:active:not(:disabled):not(.label-remove-button) {
+  transform: translateY(0);
+  box-shadow: 0 3px 10px var(--button-shadow);
+}
+button:disabled {
+  box-shadow: none;
+  transform: none;
+  filter: none;
 }
 #reload {
   background: #0f766e;
+  --button-shadow: rgba(15, 118, 110, 0.16);
+}
+#reload:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
 }
 #clear {
+  --button-shadow: rgba(71, 85, 105, 0.08);
   background: #f8fafc;
   color: #475569;
   border-color: #94a3b8;
@@ -1135,11 +1215,18 @@ button {
   background: #eef2f7;
 }
 .secondary-button {
+  --button-shadow: rgba(53, 92, 125, 0.14);
   background: #355c7d;
+}
+.content-shell,
+.events-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 #sessions {
   overflow: auto;
-  flex: 1;
+  height: 100%;
 }
 .session-item {
   padding: 10px 12px;
@@ -1288,14 +1375,41 @@ button {
   background: #e6f1ff;
   border-color: #bdd9f7;
 }
+.meta-note {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid #d4dde8;
+  background: #eef2f7;
+  color: #334155;
+}
+.meta-note.error {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
 .detail-toolbar {
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  background: #f8fbff;
+}
+.detail-toolbar-row {
   display: flex;
   gap: 14px;
   flex-wrap: wrap;
   align-items: center;
-  background: #f8fbff;
+}
+.detail-toolbar-row.secondary {
+  padding-top: 8px;
+  border-top: 1px solid rgba(204, 216, 228, 0.72);
+}
+.detail-toolbar-row.secondary.hidden {
+  display: none;
 }
 .detail-toolbar label {
   display: inline-flex;
@@ -1305,7 +1419,11 @@ button {
   color: #324255;
   user-select: none;
 }
+.detail-toolbar-spacer {
+  flex: 1 1 auto;
+}
 .detail-toolbar #copy_resume_command {
+  --button-shadow: rgba(15, 118, 110, 0.15);
   background: #0f766e;
 }
 .detail-toolbar #copy_resume_command:disabled {
@@ -1313,13 +1431,46 @@ button {
   cursor: not-allowed;
 }
 .detail-toolbar #refresh_detail {
+  --button-shadow: rgba(29, 78, 216, 0.17);
   background: #1d4ed8;
 }
 .detail-toolbar #refresh_detail:disabled {
   background: #94a3b8;
   cursor: not-allowed;
 }
+.detail-toolbar #toggle_detail_actions {
+  --button-shadow: rgba(53, 92, 125, 0.14);
+  background: #355c7d;
+}
+.detail-toolbar #copy_displayed_messages {
+  --button-shadow: rgba(71, 85, 105, 0.12);
+  background: #475569;
+}
+.detail-toolbar #copy_displayed_messages:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+.detail-toolbar #event_selection_mode {
+  --button-shadow: rgba(8, 145, 178, 0.14);
+  background: #0891b2;
+}
+.detail-toolbar #event_selection_mode.selection-active {
+  background: #0f766e;
+}
+.detail-toolbar #event_selection_mode:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+.detail-toolbar #copy_selected_messages {
+  --button-shadow: rgba(37, 99, 235, 0.13);
+  background: #2563eb;
+}
+.detail-toolbar #copy_selected_messages:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
 #add_session_label {
+  --button-shadow: rgba(124, 58, 237, 0.18);
   background: #7c3aed;
 }
 #add_session_label:disabled {
@@ -1343,7 +1494,92 @@ button {
 #events {
   padding: 14px;
   overflow: auto;
-  flex: 1;
+  height: 100%;
+}
+.event-spacer {
+  height: 0;
+  pointer-events: none;
+}
+.status-wrap {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.status-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(248, 251, 255, 0.78);
+  backdrop-filter: blur(3px);
+  z-index: 5;
+}
+.status-layer.hidden {
+  display: none;
+}
+.status-card {
+  width: min(100%, 360px);
+  border: 1px solid #d7e4ef;
+  border-radius: 18px;
+  padding: 18px 20px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.1);
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+}
+.status-card.empty {
+  border-style: dashed;
+  box-shadow: none;
+}
+.status-card.error {
+  border-color: #fecaca;
+  background: rgba(255, 245, 245, 0.98);
+}
+.status-title {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+}
+.status-copy {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.status-spinner,
+.status-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.status-spinner {
+  border: 3px solid #cfe3f5;
+  border-top-color: var(--accent);
+  animation: status-spin 0.9s linear infinite;
+}
+.status-icon {
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 800;
+}
+.status-icon.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .ev {
   border: 1px solid var(--line);
@@ -1352,6 +1588,9 @@ button {
   padding: 10px;
   margin-bottom: 10px;
   background: #fbfdff;
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 320px;
 }
 .ev.user { border-left-color: var(--user); background: #e7f1ff; }
 .ev.user_context { border-left-color: #7f8ea0; background: #f5f7fa; }
@@ -1360,6 +1599,10 @@ button {
 .ev.system { border-left-color: var(--system); background: #f0f3f7; }
 .ev.label-match {
   box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
+}
+.ev.copy-selected {
+  outline: 2px solid rgba(37, 99, 235, 0.24);
+  outline-offset: 1px;
 }
 .ev-head {
   display: flex;
@@ -1376,12 +1619,39 @@ button {
   gap: 6px;
   flex-wrap: wrap;
 }
+.event-select-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: rgba(255, 255, 255, 0.8);
+  color: #1e3a8a;
+  font-size: 11px;
+  font-weight: 700;
+}
+.event-select-toggle input {
+  margin: 0;
+  accent-color: #2563eb;
+}
 .event-label-add-button {
+  --button-shadow: rgba(124, 58, 237, 0.14);
   background: #7c3aed;
   padding: 6px 9px;
   font-size: 12px;
 }
 .event-label-add-button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+.event-copy-button {
+  --button-shadow: rgba(71, 85, 105, 0.1);
+  background: #475569;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.event-copy-button:disabled {
   background: #94a3b8;
   cursor: not-allowed;
 }
@@ -1460,6 +1730,8 @@ button {
   line-height: 1;
   font-size: 12px;
   cursor: pointer;
+  box-shadow: none;
+  transition: color 0.18s ease, opacity 0.18s ease;
 }
 .data-label-badge .label-remove-button:hover {
   color: #0f172a;
@@ -1508,9 +1780,51 @@ pre {
   padding: 10px 12px;
 }
 @media (max-width: 900px) {
+  #toggle_session_list_mobile {
+    display: inline-flex;
+  }
   .container {
+    display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: 40vh 1fr;
+  }
+  .container.sidebar-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: 0 1fr;
+  }
+  .left,
+  .splitter,
+  .right {
+    position: static;
+    top: auto;
+    left: auto;
+    bottom: auto;
+    width: auto;
+    margin-left: 0;
+    transition: none;
+    will-change: auto;
+  }
+  .left {
+    grid-column: 1;
+    grid-row: 1;
+    transform: none;
+    opacity: 1;
+  }
+  .right {
+    grid-column: 1;
+    grid-row: 2;
+    height: auto;
+  }
+  .container.sidebar-collapsed .left {
+    transform: none;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .container.sidebar-collapsed .right {
+    margin-left: 0;
+  }
+  .splitter {
+    display: none;
   }
 }
 </style>
@@ -1523,6 +1837,7 @@ pre {
       <small id="root"></small>
     </div>
     <div class="header-actions">
+      <button id="toggle_session_list_mobile" class="secondary-button">一覧を隠す</button>
       <button id="open_label_manager" class="secondary-button">ラベル管理</button>
     </div>
   </div>
@@ -1557,23 +1872,41 @@ pre {
         <button id="toggle_filters" class="secondary-button">Hide</button>
       </div>
     </div>
-    <div id="sessions"></div>
+    <div class="content-shell">
+      <div id="sessions"></div>
+      <div id="sessions_status" class="status-layer hidden" aria-live="polite"></div>
+    </div>
   </aside>
+  <div class="splitter">
+    <button id="toggle_session_list" class="splitter-button" aria-label="左ペインを隠す" title="左ペインを隠す">&lt;</button>
+  </div>
   <main class="right">
     <div class="meta" id="meta">セッションを選択してください</div>
     <div class="detail-toolbar">
-      <label><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
-      <label><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
-      <label><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
-      <select id="detail_event_label_filter">
-        <option value="">event label: all</option>
-      </select>
-      <button id="refresh_detail" disabled>Refresh</button>
-      <button id="copy_resume_command" disabled>セッション再開コマンドコピー</button>
-      <button id="add_session_label" disabled>セッションにラベル追加</button>
+      <div class="detail-toolbar-row primary">
+        <label><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
+        <label><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
+        <label><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
+        <select id="detail_event_label_filter">
+          <option value="">event label: all</option>
+        </select>
+        <button id="refresh_detail" disabled>Refresh</button>
+        <span class="detail-toolbar-spacer"></span>
+        <button id="toggle_detail_actions" class="secondary-button">Hide</button>
+      </div>
+      <div id="detail_action_row" class="detail-toolbar-row secondary">
+        <button id="copy_resume_command" disabled>セッション再開コマンドコピー</button>
+        <button id="add_session_label" disabled>セッションにラベル追加</button>
+        <button id="copy_displayed_messages" disabled>表示中メッセージコピー</button>
+        <button id="event_selection_mode" disabled>選択モード</button>
+        <button id="copy_selected_messages" disabled>選択コピー</button>
+      </div>
     </div>
     <div class="session-label-strip empty" id="session_label_strip">セッションラベルはまだありません</div>
-    <div id="events"></div>
+    <div class="events-shell">
+      <div id="events"></div>
+      <div id="detail_status" class="status-layer hidden" aria-live="polite"></div>
+    </div>
   </main>
 </div>
 <div id="label_picker" class="label-picker hidden"></div>
@@ -1586,15 +1919,37 @@ const state = {
   activeEvents: [],
   activeRawLineCount: 0,
   labels: [],
+  isSessionsLoading: false,
+  hasLoadedSessions: false,
+  sessionsError: '',
+  sessionsLoadMode: '',
+  isDetailLoading: false,
+  detailError: '',
+  detailLoadMode: '',
+  isEventSelectionMode: false,
+  selectedEventIds: new Set(),
 };
 
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
 const SEARCH_DEBOUNCE_MS = 180;
+const BUTTON_FEEDBACK_MS = 1200;
+const DETAIL_VIRTUALIZE_AFTER = 180;
+const DETAIL_VIRTUAL_OVERSCAN_PX = 900;
+const DETAIL_ESTIMATED_EVENT_HEIGHT = 240;
+const DETAIL_EVENT_VERTICAL_GAP = 10;
 let loadSessionsTimer = null;
 let loadSessionsRequestSeq = 0;
+let loadSessionDetailRequestSeq = 0;
+let saveFiltersFrame = 0;
+let detailListRenderFrame = 0;
+let detailMeasureFrame = 0;
+let detailHeightCache = new Map();
+let detailKnownWidth = 0;
 let labelManagerWindow = null;
 let labelPickerHandler = null;
 let filtersVisible = true;
+let detailActionsVisible = true;
+let leftPaneVisible = true;
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -1602,6 +1957,41 @@ function esc(s){
 
 function renderColorStyle(colorValue){
   return `--label-color:${esc(colorValue || '#94a3b8')}`;
+}
+
+function buildStatusCard(title, copy, tone){
+  const kind = tone || 'loading';
+  const indicator = kind === 'loading'
+    ? '<span class="status-spinner" aria-hidden="true"></span>'
+    : `<span class="status-icon ${kind === 'error' ? 'error' : ''}" aria-hidden="true">${kind === 'error' ? '!' : 'i'}</span>`;
+  return `<div class="status-card ${esc(kind)}">${indicator}<div class="status-title">${esc(title || '')}</div>${copy ? `<div class="status-copy">${esc(copy)}</div>` : ''}</div>`;
+}
+
+function renderInlineStatus(title, copy, tone){
+  return `<div class="status-wrap">${buildStatusCard(title, copy, tone)}</div>`;
+}
+
+function setStatusLayer(id, title, copy, tone){
+  const layer = document.getElementById(id);
+  if(!layer){
+    return;
+  }
+  if(!title){
+    layer.classList.add('hidden');
+    layer.innerHTML = '';
+    return;
+  }
+  layer.innerHTML = buildStatusCard(title, copy, tone);
+  layer.classList.remove('hidden');
+}
+
+function updateReloadButtonState(){
+  const button = document.getElementById('reload');
+  if(!button){
+    return;
+  }
+  button.disabled = state.isSessionsLoading;
+  button.textContent = state.isSessionsLoading && state.sessionsLoadMode === 'reload' ? 'Reloading...' : 'Reload';
 }
 
 function updateFilterVisibility(){
@@ -1619,6 +2009,69 @@ function updateFilterVisibility(){
 function setFiltersVisible(nextVisible){
   filtersVisible = !!nextVisible;
   updateFilterVisibility();
+  saveFiltersSoon();
+}
+
+function updateDetailActionsVisibility(){
+  const row = document.getElementById('detail_action_row');
+  const button = document.getElementById('toggle_detail_actions');
+  if(!row || !button){
+    return;
+  }
+  row.classList.toggle('hidden', !detailActionsVisible);
+  button.textContent = detailActionsVisible ? 'Hide' : 'Show';
+}
+
+function setDetailActionsVisible(nextVisible){
+  detailActionsVisible = !!nextVisible;
+  updateDetailActionsVisibility();
+  saveFiltersSoon();
+}
+
+function updateLeftPaneVisibility(){
+  const container = document.querySelector('.container');
+  const splitterButton = document.getElementById('toggle_session_list');
+  const mobileButton = document.getElementById('toggle_session_list_mobile');
+  if(!container || !splitterButton){
+    return;
+  }
+  container.classList.toggle('sidebar-collapsed', !leftPaneVisible);
+  splitterButton.textContent = leftPaneVisible ? '<' : '>';
+  const label = leftPaneVisible ? '左ペインを隠す' : '左ペインを表示';
+  splitterButton.title = label;
+  splitterButton.setAttribute('aria-label', label);
+  if(mobileButton){
+    mobileButton.textContent = leftPaneVisible ? '一覧を隠す' : '一覧を表示';
+    mobileButton.setAttribute('aria-label', label);
+    mobileButton.title = label;
+  }
+}
+
+function setLeftPaneVisible(nextVisible){
+  leftPaneVisible = !!nextVisible;
+  updateLeftPaneVisibility();
+  resetDetailVirtualState();
+  scheduleDetailListRender();
+  saveFiltersSoon();
+}
+
+function saveFiltersSoon(){
+  if(saveFiltersFrame){
+    cancelAnimationFrame(saveFiltersFrame);
+  }
+  saveFiltersFrame = requestAnimationFrame(() => {
+    saveFiltersFrame = 0;
+    setTimeout(() => {
+      saveFilters();
+    }, 0);
+  });
+}
+
+function cancelScheduledSaveFilters(){
+  if(saveFiltersFrame){
+    cancelAnimationFrame(saveFiltersFrame);
+    saveFiltersFrame = 0;
+  }
 }
 
 function postJson(url, payload){
@@ -1694,7 +2147,9 @@ function renderSessionLabelStrip(){
   const strip = document.getElementById('session_label_strip');
   if(!state.activeSession){
     strip.classList.add('empty');
-    strip.textContent = 'セッションラベルはまだありません';
+    strip.textContent = state.isDetailLoading && state.activePath
+      ? 'セッションラベルを読み込み中...'
+      : 'セッションラベルはまだありません';
     updateSessionLabelButtonState();
     return;
   }
@@ -1714,6 +2169,231 @@ function renderSessionLabelStrip(){
     };
   });
   updateSessionLabelButtonState();
+}
+
+function cancelScheduledDetailListRender(){
+  if(detailListRenderFrame){
+    cancelAnimationFrame(detailListRenderFrame);
+    detailListRenderFrame = 0;
+  }
+}
+
+function cancelScheduledDetailMeasure(){
+  if(detailMeasureFrame){
+    cancelAnimationFrame(detailMeasureFrame);
+    detailMeasureFrame = 0;
+  }
+}
+
+function resetDetailVirtualState(options){
+  cancelScheduledDetailListRender();
+  cancelScheduledDetailMeasure();
+  if(!options || options.clearHeights !== false){
+    detailHeightCache = new Map();
+    detailKnownWidth = 0;
+  }
+}
+
+function scheduleDetailListRender(){
+  if(detailListRenderFrame){
+    return;
+  }
+  detailListRenderFrame = requestAnimationFrame(() => {
+    detailListRenderFrame = 0;
+    renderActiveEventList();
+  });
+}
+
+function scheduleDetailCardMeasurement(){
+  cancelScheduledDetailMeasure();
+  detailMeasureFrame = requestAnimationFrame(() => {
+    detailMeasureFrame = 0;
+    measureVisibleDetailEventCards();
+  });
+}
+
+function shouldVirtualizeDetailEvents(events){
+  return Array.isArray(events) && events.length >= DETAIL_VIRTUALIZE_AFTER;
+}
+
+function getDetailEventKey(ev, fallbackIndex){
+  if(ev && ev.event_id){
+    return String(ev.event_id);
+  }
+  return `${ev && ev.kind ? ev.kind : 'event'}:${ev && ev.timestamp ? ev.timestamp : ''}:${fallbackIndex}`;
+}
+
+function getCachedDetailEventHeight(eventKey){
+  return detailHeightCache.get(eventKey) || DETAIL_ESTIMATED_EVENT_HEIGHT;
+}
+
+function syncDetailHeightCacheWithWidth(eventsBox){
+  const width = Math.round(eventsBox && eventsBox.clientWidth ? eventsBox.clientWidth : 0);
+  if(width <= 0){
+    return;
+  }
+  if(detailKnownWidth && Math.abs(detailKnownWidth - width) > 24){
+    detailHeightCache = new Map();
+  }
+  detailKnownWidth = width;
+}
+
+function getVirtualizedDetailWindow(displayEvents, scrollTop, viewportHeight){
+  const startBoundary = Math.max(0, scrollTop - DETAIL_VIRTUAL_OVERSCAN_PX);
+  const endBoundary = scrollTop + viewportHeight + DETAIL_VIRTUAL_OVERSCAN_PX;
+  let cursor = 0;
+  let topHeight = 0;
+  let startIndex = 0;
+  let endIndex = displayEvents.length;
+
+  for(let index = 0; index < displayEvents.length; index++){
+    const height = getCachedDetailEventHeight(getDetailEventKey(displayEvents[index], index));
+    const nextCursor = cursor + height;
+    if(nextCursor < startBoundary){
+      topHeight = nextCursor;
+      startIndex = index + 1;
+      cursor = nextCursor;
+      continue;
+    }
+    cursor = nextCursor;
+    if(endIndex === displayEvents.length && cursor >= endBoundary){
+      endIndex = index + 1;
+    }
+  }
+
+  if(endIndex <= startIndex && displayEvents.length){
+    endIndex = Math.min(displayEvents.length, startIndex + 1);
+  }
+
+  let visibleHeight = 0;
+  for(let index = startIndex; index < endIndex; index++){
+    visibleHeight += getCachedDetailEventHeight(getDetailEventKey(displayEvents[index], index));
+  }
+
+  return {
+    startIndex,
+    endIndex,
+    topHeight,
+    bottomHeight: Math.max(0, cursor - topHeight - visibleHeight),
+  };
+}
+
+function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex){
+  const role = ev.role || 'system';
+  const roleLabel = role.replace('_', ' ');
+  const labels = ev.labels || [];
+  const matchesSelectedLabel = selectedEventLabelId && labels.some(label => String(label.id) === selectedEventLabelId);
+  let body = '';
+  if(ev.kind === 'message' || ev.kind === 'agent_update'){
+    body = `<pre>${esc(ev.text || '')}</pre>`;
+  } else if(ev.kind === 'function_call'){
+    body = `<pre>name: ${esc(ev.name)}\n${esc(ev.arguments || '')}</pre>`;
+  } else if(ev.kind === 'function_output'){
+    body = `<pre>${esc(ev.output || '')}</pre>`;
+  } else {
+    body = `<pre>${esc(JSON.stringify(ev, null, 2))}</pre>`;
+  }
+  const selectionKey = getEventSelectionKey(ev);
+  const isSelectable = state.isEventSelectionMode && isSelectableMessageEvent(ev);
+  const isSelected = selectionKey && state.selectedEventIds.has(selectionKey);
+  const selectionCheckboxHtml = isSelectable
+    ? `<label class="event-select-toggle"><input type="checkbox" class="event-select-checkbox" data-event-id="${esc(selectionKey)}" ${isSelected ? 'checked' : ''} />選択</label>`
+    : '';
+  const labelsHtml = renderAssignedLabels(labels, 'event', { eventId: ev.event_id });
+  const copyButtonHtml = ev.kind === 'message'
+    ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">コピー</button>`
+    : '';
+  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''}" data-virtual-key="${esc(getDetailEventKey(ev, fallbackIndex))}"><div class="ev-head">${selectionCheckboxHtml}<span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>ラベル追加</button>${copyButtonHtml}</span></div>${body}</div>`;
+}
+
+function attachVisibleEventCardHandlers(eventsBox){
+  eventsBox.querySelectorAll('.event-label-add-button').forEach(button => {
+    button.onclick = async () => {
+      await addEventLabelFromButton(button, button.dataset.eventId);
+    };
+  });
+  eventsBox.querySelectorAll('.event-copy-button').forEach(button => {
+    button.onclick = async () => {
+      await copyEventMessage(button, button.dataset.eventId);
+    };
+  });
+  eventsBox.querySelectorAll('.event-select-checkbox').forEach(input => {
+    input.onchange = () => {
+      updateEventSelection(input.dataset.eventId, input.checked, input.closest('.ev'));
+    };
+  });
+  eventsBox.querySelectorAll('.label-remove-button[data-remove-type="event"]').forEach(button => {
+    button.onclick = async () => {
+      await removeEventLabel(button.dataset.eventId, Number(button.dataset.labelId));
+    };
+  });
+}
+
+function measureVisibleDetailEventCards(){
+  const eventsBox = document.getElementById('events');
+  if(!eventsBox || eventsBox.dataset.virtualized !== '1'){
+    return;
+  }
+  let changed = false;
+  eventsBox.querySelectorAll('.ev[data-virtual-key]').forEach(card => {
+    const eventKey = card.dataset.virtualKey;
+    const nextHeight = Math.ceil(card.getBoundingClientRect().height) + DETAIL_EVENT_VERTICAL_GAP;
+    if(!eventKey || !Number.isFinite(nextHeight) || nextHeight <= 0){
+      return;
+    }
+    const previousHeight = detailHeightCache.get(eventKey);
+    if(previousHeight == null || Math.abs(previousHeight - nextHeight) > 2){
+      detailHeightCache.set(eventKey, nextHeight);
+      changed = true;
+    }
+  });
+  if(changed){
+    scheduleDetailListRender();
+  }
+}
+
+function renderEventList(eventsBox, displayEvents, selectedEventLabelId){
+  const previousScrollTop = eventsBox.scrollTop;
+  syncDetailHeightCacheWithWidth(eventsBox);
+  if(!shouldVirtualizeDetailEvents(displayEvents)){
+    cancelScheduledDetailMeasure();
+    eventsBox.dataset.virtualized = '0';
+    eventsBox.innerHTML = displayEvents.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index)).join('');
+    eventsBox.scrollTop = previousScrollTop;
+    attachVisibleEventCardHandlers(eventsBox);
+    return;
+  }
+
+  const viewportHeight = eventsBox.clientHeight || window.innerHeight || 0;
+  const windowState = getVirtualizedDetailWindow(displayEvents, previousScrollTop, viewportHeight);
+  const visibleEvents = displayEvents.slice(windowState.startIndex, windowState.endIndex);
+  const topSpacer = windowState.topHeight
+    ? `<div class="event-spacer" style="height:${Math.round(windowState.topHeight)}px"></div>`
+    : '';
+  const bottomSpacer = windowState.bottomHeight
+    ? `<div class="event-spacer" style="height:${Math.round(windowState.bottomHeight)}px"></div>`
+    : '';
+
+  eventsBox.dataset.virtualized = '1';
+  eventsBox.innerHTML =
+    topSpacer +
+    visibleEvents.map((ev, offset) => buildEventCardHtml(ev, selectedEventLabelId, windowState.startIndex + offset)).join('') +
+    bottomSpacer;
+  eventsBox.scrollTop = previousScrollTop;
+  attachVisibleEventCardHandlers(eventsBox);
+  scheduleDetailCardMeasurement();
+}
+
+function renderActiveEventList(){
+  const eventsBox = document.getElementById('events');
+  if(!eventsBox || !state.activeSession){
+    return;
+  }
+  const displayEvents = getDisplayEvents();
+  if(!displayEvents.length){
+    return;
+  }
+  renderEventList(eventsBox, displayEvents, getSelectedDetailEventLabelFilter());
 }
 
 function hideLabelPicker(){
@@ -1822,14 +2502,150 @@ function getActiveSessionId(){
   return (state.activeSession.session_id || state.activeSession.id || '').toString().trim();
 }
 
+function getButtonLabel(button, fallback){
+  if(!button) return fallback || '';
+  if(!button.dataset.defaultLabel){
+    button.dataset.defaultLabel = button.textContent;
+  }
+  return button.dataset.defaultLabel || fallback || '';
+}
+
+function flashButtonLabel(button, temporaryLabel, fallback, duration){
+  if(!button) return;
+  const defaultLabel = getButtonLabel(button, fallback);
+  button.textContent = temporaryLabel;
+  if(button._labelTimer){
+    clearTimeout(button._labelTimer);
+  }
+  button._labelTimer = setTimeout(() => {
+    button.textContent = defaultLabel;
+  }, duration || BUTTON_FEEDBACK_MS);
+}
+
+function waitForUiFeedback(duration){
+  return new Promise(resolve => {
+    setTimeout(resolve, duration || BUTTON_FEEDBACK_MS);
+  });
+}
+
+async function copyTextToClipboard(text){
+  if(!text) return false;
+  let copied = false;
+  try {
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    }
+  } catch (e) {
+    copied = false;
+  }
+  if(copied){
+    return true;
+  }
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.setAttribute('readonly', '');
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  document.body.appendChild(helper);
+  helper.select();
+  try {
+    copied = document.execCommand('copy');
+  } finally {
+    document.body.removeChild(helper);
+  }
+  return copied;
+}
+
+function getDisplayMessageEvents(){
+  return getDisplayEvents().filter(ev => ev.kind === 'message' && (ev.text || '').trim());
+}
+
+function getEventSelectionKey(ev){
+  return ev && ev.event_id ? String(ev.event_id) : '';
+}
+
+function isSelectableMessageEvent(ev){
+  return ev && ev.kind === 'message' && (ev.text || '').trim() && getEventSelectionKey(ev);
+}
+
+function getSelectableDisplayMessageEvents(){
+  return getDisplayEvents().filter(isSelectableMessageEvent);
+}
+
+function getSelectedMessageEvents(){
+  const selectedIds = state.selectedEventIds || new Set();
+  return (state.activeEvents || []).filter(ev => isSelectableMessageEvent(ev) && selectedIds.has(getEventSelectionKey(ev)));
+}
+
+function clearSelectedEventIds(){
+  state.selectedEventIds = new Set();
+}
+
+function syncSelectedEventIdsToActiveEvents(){
+  const validIds = new Set((state.activeEvents || []).filter(isSelectableMessageEvent).map(getEventSelectionKey));
+  state.selectedEventIds = new Set(Array.from(state.selectedEventIds || []).filter(id => validIds.has(id)));
+}
+
+function updateDisplayedMessagesCopyButtonState(){
+  const button = document.getElementById('copy_displayed_messages');
+  if(!state.activeSession){
+    button.disabled = true;
+    return;
+  }
+  const hasMessages = !!getDisplayMessageEvents().length;
+  button.disabled = state.isDetailLoading || !hasMessages;
+}
+
 function updateCopyResumeButtonState(){
   const button = document.getElementById('copy_resume_command');
   button.disabled = !getActiveSessionId();
 }
 
+function updateEventSelectionModeButtonState(){
+  const button = document.getElementById('event_selection_mode');
+  if(!button){
+    return;
+  }
+  const hasSelectableMessages = !!getSelectableDisplayMessageEvents().length;
+  const hasSelectedMessages = !!getSelectedMessageEvents().length;
+  button.disabled = !state.activeSession || (!hasSelectableMessages && !hasSelectedMessages && !state.isEventSelectionMode);
+  button.textContent = state.isEventSelectionMode ? '選択終了' : '選択モード';
+  button.classList.toggle('selection-active', state.isEventSelectionMode);
+}
+
+function updateCopySelectedMessagesButtonState(){
+  const button = document.getElementById('copy_selected_messages');
+  if(!button){
+    return;
+  }
+  const selectedMessages = getSelectedMessageEvents();
+  const defaultLabel = selectedMessages.length ? `選択コピー (${selectedMessages.length}件)` : '選択コピー';
+  button.disabled = state.isDetailLoading || selectedMessages.length === 0;
+  button.textContent = defaultLabel;
+  button.dataset.defaultLabel = defaultLabel;
+}
+
 function updateRefreshDetailButtonState(){
   const button = document.getElementById('refresh_detail');
-  button.disabled = !state.activePath;
+  button.disabled = !state.activePath || state.isDetailLoading;
+  if(!state.isDetailLoading || state.detailLoadMode !== 'refresh'){
+    button.textContent = 'Refresh';
+    return;
+  }
+  button.textContent = 'Refreshing...';
+}
+
+function hasListFilter(){
+  return Boolean(
+    document.getElementById('cwd_q').value.trim() ||
+    document.getElementById('date_from').value ||
+    document.getElementById('date_to').value ||
+    document.getElementById('q').value.trim() ||
+    normalizeSourceFilter(document.getElementById('source_filter').value || 'all') !== 'all' ||
+    getSelectedSessionLabelFilter() ||
+    getSelectedListEventLabelFilter()
+  );
 }
 
 async function copyResumeCommand(){
@@ -1837,38 +2653,11 @@ async function copyResumeCommand(){
   if(!sessionId) return;
 
   const commandText = 'codex resume ' + sessionId;
-  let copied = false;
-  try {
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      await navigator.clipboard.writeText(commandText);
-      copied = true;
-    }
-  } catch (e) {
-    copied = false;
-  }
-
-  if(!copied){
-    const helper = document.createElement('textarea');
-    helper.value = commandText;
-    helper.setAttribute('readonly', '');
-    helper.style.position = 'fixed';
-    helper.style.opacity = '0';
-    document.body.appendChild(helper);
-    helper.select();
-    try {
-      copied = document.execCommand('copy');
-    } finally {
-      document.body.removeChild(helper);
-    }
-  }
+  const copied = await copyTextToClipboard(commandText);
 
   if(copied){
     const button = document.getElementById('copy_resume_command');
-    const original = button.textContent;
-    button.textContent = 'コピーしました';
-    setTimeout(() => {
-      button.textContent = original;
-    }, 1200);
+    flashButtonLabel(button, 'コピーしました', 'セッション再開コマンドコピー');
   }
 }
 
@@ -1883,9 +2672,21 @@ function scheduleLoadSessions(){
   }, SEARCH_DEBOUNCE_MS);
 }
 
-async function loadSessions(){
+function normalizeRequestError(error, fallback){
+  if(error && typeof error.message === 'string' && error.message.trim()){
+    return error.message.trim();
+  }
+  return fallback;
+}
+
+async function loadSessions(options){
   saveFilters();
   const requestId = ++loadSessionsRequestSeq;
+  const loadMode = options && options.mode ? options.mode : 'auto';
+  state.isSessionsLoading = true;
+  state.sessionsError = '';
+  state.sessionsLoadMode = loadMode;
+  renderSessionList();
   const params = new URLSearchParams();
   params.set('ts', Date.now().toString());
   const q = document.getElementById('q').value.trim();
@@ -1901,25 +2702,44 @@ async function loadSessions(){
   if(eventLabelId){
     params.set('event_label_id', eventLabelId);
   }
-  const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
-  const data = await r.json();
-  if(requestId !== loadSessionsRequestSeq){
-    return;
-  }
-  state.sessions = data.sessions;
-  document.getElementById('root').textContent = data.root;
-  applyFilter();
-  if(state.activePath){
-    const exists = state.sessions.some(s => s.path === state.activePath);
-    if(exists){
-      await openSession(state.activePath);
-    } else {
-      state.activePath = null;
-      state.activeSession = null;
-      state.activeEvents = [];
-      state.activeRawLineCount = 0;
+  try {
+    const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
+    const data = await r.json();
+    if(requestId !== loadSessionsRequestSeq){
+      return;
+    }
+    state.sessions = Array.isArray(data.sessions) ? data.sessions : [];
+    state.sessionsError = data.error || '';
+    document.getElementById('root').textContent = data.root || '';
+    applyFilter();
+    if(state.activePath){
+      const exists = state.sessions.some(s => s.path === state.activePath);
+      if(exists){
+        await openSession(state.activePath, { mode: 'sync' });
+      } else {
+        state.activePath = null;
+        state.activeSession = null;
+        state.activeEvents = [];
+        state.activeRawLineCount = 0;
+        state.detailError = '';
+        state.detailLoadMode = '';
+        clearSelectedEventIds();
+        renderSessionList();
+        renderActiveSession();
+      }
+    }
+  } catch (error) {
+    if(requestId !== loadSessionsRequestSeq){
+      return;
+    }
+    state.sessionsError = normalizeRequestError(error, 'セッション一覧の取得に失敗しました');
+    renderSessionList();
+  } finally {
+    if(requestId === loadSessionsRequestSeq){
+      state.isSessionsLoading = false;
+      state.hasLoadedSessions = true;
+      state.sessionsLoadMode = '';
       renderSessionList();
-      renderActiveSession();
     }
   }
 }
@@ -1935,6 +2755,8 @@ function saveFilters(){
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
     detail_event_label_filter: getSelectedDetailEventLabelFilter(),
+    detail_actions_visible: detailActionsVisible,
+    left_pane_visible: leftPaneVisible,
   };
   try {
     localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
@@ -1963,12 +2785,15 @@ function restoreFilters(){
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
+    if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
+    if(typeof data.left_pane_visible === 'boolean') leftPaneVisible = data.left_pane_visible;
   } catch (e) {
     // Ignore invalid saved filters.
   }
 }
 
 function clearFilters(){
+  cancelScheduledSaveFilters();
   document.getElementById('cwd_q').value = '';
   document.getElementById('date_from').value = '';
   document.getElementById('date_to').value = '';
@@ -1987,7 +2812,7 @@ function clearFilters(){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
   }
-  loadSessions();
+  loadSessions({ mode: 'clear' });
 }
 
 function applyFilter(){
@@ -2024,21 +2849,58 @@ function applyFilter(){
 
 function renderSessionList(){
   const box = document.getElementById('sessions');
-  box.innerHTML = state.filtered.map(s => `
-    <div class="session-item ${state.activePath === s.path ? 'active' : ''}" data-path="${esc(s.path)}">
-      <div class="session-path">${highlightSessionPath(s.relative_path)}</div>
-      <div class="session-preview">${esc(s.first_real_user_text || s.first_user_text || '(previewなし)')}</div>
-      <div class="session-meta-row">
-        <div class="session-badge session-time">${esc(fmt(s.started_at || s.mtime))}</div>
-        <div class="session-badge session-source source-${esc(normalizeSource(s.source))}">${esc(sourceLabel(s.source))}</div>
+  updateReloadButtonState();
+  if(state.isSessionsLoading && !state.hasLoadedSessions){
+    box.innerHTML = renderInlineStatus(
+      'セッション一覧を読み込み中...',
+      '最新のセッションを確認しています。',
+      'loading'
+    );
+  } else if(state.sessionsError && !state.sessions.length){
+    box.innerHTML = renderInlineStatus(
+      '一覧の取得に失敗しました',
+      state.sessionsError,
+      'error'
+    );
+  } else if(!state.filtered.length){
+    box.innerHTML = hasListFilter()
+      ? renderInlineStatus(
+          '条件に一致するセッションはありません',
+          'フィルタ条件を見直すか、Reload を実行してください。',
+          'empty'
+        )
+      : renderInlineStatus(
+          'セッションがまだ見つかりません',
+          '読み込み対象ディレクトリに .jsonl セッションがあるか確認してください。',
+          'empty'
+        );
+  } else {
+    box.innerHTML = state.filtered.map(s => `
+      <div class="session-item ${state.activePath === s.path ? 'active' : ''}" data-path="${esc(s.path)}">
+        <div class="session-path">${highlightSessionPath(s.relative_path)}</div>
+        <div class="session-preview">${esc(s.first_real_user_text || s.first_user_text || '(previewなし)')}</div>
+        <div class="session-meta-row">
+          <div class="session-badge session-time">${esc(fmt(s.started_at || s.mtime))}</div>
+          <div class="session-badge session-source source-${esc(normalizeSource(s.source))}">${esc(sourceLabel(s.source))}</div>
+        </div>
+        <div class="session-label-row">${renderAssignedLabels(s.session_labels || [])}</div>
+        <div class="session-meta-row">
+          <div class="session-badge session-cwd">cwd: ${esc(s.cwd || '-')}</div>
+          <div class="session-badge session-id">id: ${esc(s.session_id || s.id || '')}</div>
+        </div>
       </div>
-      <div class="session-label-row">${renderAssignedLabels(s.session_labels || [])}</div>
-      <div class="session-meta-row">
-        <div class="session-badge session-cwd">cwd: ${esc(s.cwd || '-')}</div>
-        <div class="session-badge session-id">id: ${esc(s.session_id || s.id || '')}</div>
-      </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
+  if(state.isSessionsLoading && state.hasLoadedSessions && state.sessionsLoadMode === 'reload'){
+    setStatusLayer(
+      'sessions_status',
+      '一覧を更新中...',
+      '最新のセッションを再取得しています。',
+      'loading'
+    );
+  } else {
+    setStatusLayer('sessions_status');
+  }
   box.querySelectorAll('.session-item').forEach(el => {
     el.onclick = () => openSession(el.dataset.path);
   });
@@ -2062,6 +2924,14 @@ function getDisplayEvents(){
     events = [...events].reverse();
   }
   return events;
+}
+
+function formatCopiedMessages(events){
+  return events.map(ev => {
+    const role = ev.role || 'system';
+    const timestamp = fmt(ev.timestamp) || ev.timestamp || '-';
+    return `[${role}] ${timestamp}\n${ev.text || ''}`;
+  }).join('\\n\\n-----\\n\\n');
 }
 
 async function removeSessionLabel(labelId){
@@ -2122,84 +2992,229 @@ async function removeEventLabel(eventId, labelId){
   await loadSessions();
 }
 
+async function copyDisplayedMessages(){
+  const messages = getDisplayMessageEvents();
+  if(!messages.length){
+    return;
+  }
+  const copied = await copyTextToClipboard(formatCopiedMessages(messages));
+  if(copied){
+    const button = document.getElementById('copy_displayed_messages');
+    flashButtonLabel(button, `${messages.length}件コピー`, '表示中メッセージコピー');
+  }
+}
+
+async function copySelectedMessages(){
+  const messages = getSelectedMessageEvents();
+  if(!messages.length){
+    return;
+  }
+  const copied = await copyTextToClipboard(formatCopiedMessages(messages));
+  if(copied){
+    const copiedCount = messages.length;
+    const button = document.getElementById('copy_selected_messages');
+    flashButtonLabel(button, `${copiedCount}件コピー`, '選択コピー', BUTTON_FEEDBACK_MS);
+    await waitForUiFeedback(BUTTON_FEEDBACK_MS);
+    state.isEventSelectionMode = false;
+    clearSelectedEventIds();
+    renderActiveSession();
+  }
+}
+
+async function copyEventMessage(button, eventId){
+  const event = (state.activeEvents || []).find(ev => ev.event_id === eventId && ev.kind === 'message');
+  if(!event || !event.text){
+    return;
+  }
+  const copied = await copyTextToClipboard(event.text);
+  if(copied){
+    flashButtonLabel(button, 'コピーしました', 'コピー');
+  }
+}
+
+function toggleEventSelectionMode(){
+  state.isEventSelectionMode = !state.isEventSelectionMode;
+  if(!state.isEventSelectionMode){
+    clearSelectedEventIds();
+  }
+  renderActiveSession();
+}
+
+function updateEventSelection(eventId, checked, card){
+  const key = String(eventId || '');
+  if(!key){
+    return;
+  }
+  if(checked){
+    state.selectedEventIds.add(key);
+  } else {
+    state.selectedEventIds.delete(key);
+  }
+  if(card){
+    card.classList.toggle('copy-selected', checked);
+  }
+  updateCopySelectedMessagesButtonState();
+}
+
 function renderActiveSession(){
   const meta = document.getElementById('meta');
   const eventsBox = document.getElementById('events');
   updateRefreshDetailButtonState();
   if(!state.activeSession){
-    meta.textContent = 'セッションを選択してください';
-    eventsBox.innerHTML = '';
+    resetDetailVirtualState({ clearHeights: false });
+    eventsBox.dataset.virtualized = '0';
+    if(state.isDetailLoading && state.activePath){
+      meta.textContent = 'セッション詳細を読み込み中...';
+      eventsBox.innerHTML = renderInlineStatus(
+        'セッション詳細を読み込み中...',
+        'イベントを取得しています。',
+        'loading'
+      );
+    } else if(state.detailError){
+      meta.textContent = state.detailError;
+      eventsBox.innerHTML = renderInlineStatus(
+        '詳細の取得に失敗しました',
+        state.detailError,
+        'error'
+      );
+    } else {
+      meta.textContent = 'セッションを選択してください';
+      eventsBox.innerHTML = '';
+    }
+    setStatusLayer('detail_status');
     updateCopyResumeButtonState();
+    updateDisplayedMessagesCopyButtonState();
+    updateEventSelectionModeButtonState();
+    updateCopySelectedMessagesButtonState();
     renderSessionLabelStrip();
     updateSessionLabelButtonState();
     return;
   }
 
+  syncSelectedEventIdsToActiveEvents();
   const displayEvents = getDisplayEvents();
   const source = normalizeSource(state.activeSession.source);
-  const selectedEventLabelId = getSelectedDetailEventLabelFilter();
+  const eventsSummary = state.isDetailLoading && state.activeEvents.length === 0
+    ? 'events: loading...'
+    : `events: ${displayEvents.length}/${state.activeEvents.length}`;
+  const rawSummary = state.isDetailLoading && state.activeEvents.length === 0
+    ? '...'
+    : state.activeRawLineCount;
+  const errorNote = state.detailError
+    ? ` | status: <span class="meta-note error">${esc(state.detailError)}</span>`
+    : '';
   meta.innerHTML =
-    `path: <code class="path-code">${highlightSessionPath(state.activeSession.relative_path)}</code> | cwd: <code class="cwd-code">${esc(state.activeSession.cwd || '-')}</code> | time: <code class="time-code">${esc(fmt(state.activeSession.started_at || state.activeSession.mtime))}</code> | source: <code class="source-code source-${esc(source)}">${esc(sourceLabel(source))}</code> | events: ${displayEvents.length}/${state.activeEvents.length} | raw lines: ${state.activeRawLineCount}`;
+    `path: <code class="path-code">${highlightSessionPath(state.activeSession.relative_path)}</code> | cwd: <code class="cwd-code">${esc(state.activeSession.cwd || '-')}</code> | time: <code class="time-code">${esc(fmt(state.activeSession.started_at || state.activeSession.mtime))}</code> | source: <code class="source-code source-${esc(source)}">${esc(sourceLabel(source))}</code> | ${eventsSummary} | raw lines: ${rawSummary}${errorNote}`;
 
-  eventsBox.innerHTML = displayEvents.map(ev => {
-    const role = ev.role || 'system';
-    const roleLabel = role.replace('_', ' ');
-    const labels = ev.labels || [];
-    const matchesSelectedLabel = selectedEventLabelId && labels.some(label => String(label.id) === selectedEventLabelId);
-    let body = '';
-    if(ev.kind === 'message' || ev.kind === 'agent_update'){
-      body = `<pre>${esc(ev.text || '')}</pre>`;
-    } else if(ev.kind === 'function_call'){
-      body = `<pre>name: ${esc(ev.name)}\n${esc(ev.arguments || '')}</pre>`;
-    } else if(ev.kind === 'function_output'){
-      body = `<pre>${esc(ev.output || '')}</pre>`;
-    } else {
-      body = `<pre>${esc(JSON.stringify(ev, null, 2))}</pre>`;
-    }
-    const labelsHtml = renderAssignedLabels(labels, 'event', { eventId: ev.event_id });
-    return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''}"><div class="ev-head"><span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>ラベル追加</button></span></div>${body}</div>`;
-  }).join('');
+  if(state.isDetailLoading && state.activeEvents.length === 0){
+    resetDetailVirtualState({ clearHeights: false });
+    eventsBox.dataset.virtualized = '0';
+    eventsBox.innerHTML = renderInlineStatus(
+      'セッション詳細を読み込み中...',
+      'イベントを取得しています。',
+      'loading'
+    );
+  } else if(state.detailError && state.activeEvents.length === 0){
+    resetDetailVirtualState({ clearHeights: false });
+    eventsBox.dataset.virtualized = '0';
+    eventsBox.innerHTML = renderInlineStatus(
+      '詳細の取得に失敗しました',
+      state.detailError,
+      'error'
+    );
+  } else if(displayEvents.length === 0){
+    resetDetailVirtualState({ clearHeights: false });
+    eventsBox.dataset.virtualized = '0';
+    eventsBox.innerHTML = state.activeEvents.length === 0
+      ? renderInlineStatus(
+          '表示できるイベントはありません',
+          'このセッションには表示対象のイベントがありません。',
+          'empty'
+        )
+      : renderInlineStatus(
+          '条件に一致するイベントはありません',
+          '表示条件を変更するとイベントが表示される可能性があります。',
+          'empty'
+        );
+  } else {
+    renderEventList(eventsBox, displayEvents, getSelectedDetailEventLabelFilter());
+  }
+  if(state.isDetailLoading && state.activeEvents.length > 0 && state.detailLoadMode === 'refresh'){
+    setStatusLayer(
+      'detail_status',
+      'セッション詳細を更新中...',
+      '最新のイベントを再取得しています。',
+      'loading'
+    );
+  } else {
+    setStatusLayer('detail_status');
+  }
   renderSessionLabelStrip();
   updateSessionLabelButtonState();
-  eventsBox.querySelectorAll('.event-label-add-button').forEach(button => {
-    button.onclick = async () => {
-      await addEventLabelFromButton(button, button.dataset.eventId);
-    };
-  });
-  eventsBox.querySelectorAll('.label-remove-button[data-remove-type="event"]').forEach(button => {
-    button.onclick = async () => {
-      await removeEventLabel(button.dataset.eventId, Number(button.dataset.labelId));
-    };
-  });
+  updateDisplayedMessagesCopyButtonState();
+  updateEventSelectionModeButtonState();
+  updateCopySelectedMessagesButtonState();
   updateCopyResumeButtonState();
 }
 
-async function openSession(path){
+async function openSession(path, options){
+  const requestId = ++loadSessionDetailRequestSeq;
+  const nextSession = state.sessions.find(s => s.path === path) || null;
+  const previousPath = state.activeSession && state.activeSession.path ? state.activeSession.path : state.activePath;
+  const loadMode = options && options.mode ? options.mode : 'open';
   state.activePath = path;
-  renderSessionList();
-  const r = await fetch('/api/session?path=' + encodeURIComponent(path) + '&ts=' + Date.now(), { cache: 'no-store' });
-  const data = await r.json();
-  if(data.error){
-    state.activeSession = null;
+  state.isDetailLoading = true;
+  state.detailError = '';
+  state.detailLoadMode = loadMode;
+  if(nextSession){
+    state.activeSession = nextSession;
+  }
+  if(!state.activeSession || state.activeSession.path !== path){
+    state.activeSession = nextSession;
+  }
+  if(previousPath !== path){
     state.activeEvents = [];
     state.activeRawLineCount = 0;
-    document.getElementById('meta').textContent = data.error;
-    document.getElementById('events').innerHTML = '';
-    updateRefreshDetailButtonState();
-    updateCopyResumeButtonState();
-    renderSessionLabelStrip();
-    updateSessionLabelButtonState();
-    return;
+    clearSelectedEventIds();
+    resetDetailVirtualState();
   }
-  state.activeSession = data.session;
-  state.activeEvents = data.events || [];
-  state.activeRawLineCount = data.raw_line_count || 0;
+  renderSessionList();
   renderActiveSession();
+  try {
+    const r = await fetch('/api/session?path=' + encodeURIComponent(path) + '&ts=' + Date.now(), { cache: 'no-store' });
+    const data = await r.json();
+    if(requestId !== loadSessionDetailRequestSeq){
+      return;
+    }
+    if(data.error){
+      state.detailError = data.error;
+      if(!state.activeEvents.length){
+        state.activeRawLineCount = 0;
+      }
+      return;
+    }
+    state.activeSession = data.session || nextSession;
+    state.activeEvents = data.events || [];
+    state.activeRawLineCount = data.raw_line_count || 0;
+    state.detailError = '';
+    syncSelectedEventIdsToActiveEvents();
+  } catch (error) {
+    if(requestId !== loadSessionDetailRequestSeq){
+      return;
+    }
+    state.detailError = normalizeRequestError(error, 'セッション詳細の取得に失敗しました');
+  } finally {
+    if(requestId === loadSessionDetailRequestSeq){
+      state.isDetailLoading = false;
+      state.detailLoadMode = '';
+      renderActiveSession();
+    }
+  }
 }
 
 async function refreshActiveSession(){
   if(!state.activePath) return;
-  await openSession(state.activePath);
+  await openSession(state.activePath, { mode: 'refresh' });
 }
 
 document.getElementById('cwd_q').addEventListener('input', applyFilter);
@@ -2212,26 +3227,55 @@ document.getElementById('session_label_filter').addEventListener('change', sched
 document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('detail_event_label_filter').addEventListener('change', () => {
   saveFilters();
+  resetDetailVirtualState({ clearHeights: false });
   renderActiveSession();
 });
 document.getElementById('toggle_filters').addEventListener('click', () => {
   setFiltersVisible(!filtersVisible);
+});
+document.getElementById('toggle_session_list').addEventListener('click', () => {
+  setLeftPaneVisible(!leftPaneVisible);
+});
+document.getElementById('toggle_session_list_mobile').addEventListener('click', () => {
+  setLeftPaneVisible(!leftPaneVisible);
+});
+document.getElementById('toggle_detail_actions').addEventListener('click', () => {
+  setDetailActionsVisible(!detailActionsVisible);
 });
 document.getElementById('reload').addEventListener('click', () => {
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
   }
-  loadSessions();
+  loadSessions({ mode: 'reload' });
 });
 document.getElementById('clear').addEventListener('click', clearFilters);
-document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
-document.getElementById('only_ai_response').addEventListener('change', renderActiveSession);
-document.getElementById('reverse_order').addEventListener('change', renderActiveSession);
+document.getElementById('only_user_instruction').addEventListener('change', () => {
+  resetDetailVirtualState({ clearHeights: false });
+  renderActiveSession();
+});
+document.getElementById('only_ai_response').addEventListener('change', () => {
+  resetDetailVirtualState({ clearHeights: false });
+  renderActiveSession();
+});
+document.getElementById('reverse_order').addEventListener('change', () => {
+  resetDetailVirtualState({ clearHeights: false });
+  renderActiveSession();
+});
 document.getElementById('refresh_detail').addEventListener('click', refreshActiveSession);
 document.getElementById('copy_resume_command').addEventListener('click', copyResumeCommand);
+document.getElementById('copy_displayed_messages').addEventListener('click', copyDisplayedMessages);
+document.getElementById('event_selection_mode').addEventListener('click', toggleEventSelectionMode);
+document.getElementById('copy_selected_messages').addEventListener('click', copySelectedMessages);
 document.getElementById('add_session_label').addEventListener('click', async (event) => {
   await addSessionLabelFromButton(event.currentTarget);
+});
+document.getElementById('events').addEventListener('scroll', () => {
+  const eventsBox = document.getElementById('events');
+  if(!eventsBox || eventsBox.dataset.virtualized !== '1'){
+    return;
+  }
+  scheduleDetailListRender();
 });
 document.getElementById('open_label_manager').addEventListener('click', openLabelManagerWindow);
 document.addEventListener('click', (event) => {
@@ -2245,17 +3289,30 @@ document.addEventListener('click', (event) => {
 window.addEventListener('message', async (event) => {
   if(!event.data || event.data.type !== 'labels-updated') return;
   await loadLabels(false);
-  await loadSessions();
+  await loadSessions({ mode: 'labels' });
 });
 window.addEventListener('focus', async () => {
   await loadLabels(false);
-  await loadSessions();
+  await loadSessions({ mode: 'focus' });
+});
+window.addEventListener('resize', () => {
+  resetDetailVirtualState();
+  scheduleDetailListRender();
 });
 updateCopyResumeButtonState();
+updateDisplayedMessagesCopyButtonState();
+updateEventSelectionModeButtonState();
+updateCopySelectedMessagesButtonState();
 updateRefreshDetailButtonState();
 updateFilterVisibility();
 restoreFilters();
-loadLabels(false).then(() => loadSessions());
+updateLeftPaneVisibility();
+updateDetailActionsVisibility();
+state.isSessionsLoading = true;
+renderSessionList();
+loadLabels(false)
+  .catch(() => {})
+  .finally(() => loadSessions({ mode: 'initial' }));
 </script>
 </body>
 </html>
@@ -2506,23 +3563,24 @@ button {
   cursor: pointer;
   font-weight: 700;
   letter-spacing: 0.01em;
-  box-shadow: 0 16px 30px rgba(15, 118, 110, 0.22);
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.16);
   transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
 }
 button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 18px 34px rgba(15, 118, 110, 0.24);
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.18);
 }
 button:active {
   transform: translateY(0);
+  box-shadow: 0 5px 12px rgba(15, 118, 110, 0.14);
 }
 .secondary {
   background: linear-gradient(135deg, #64748b 0%, #475569 100%);
-  box-shadow: 0 14px 26px rgba(71, 85, 105, 0.2);
+  box-shadow: 0 8px 18px rgba(71, 85, 105, 0.14);
 }
 .danger {
   background: linear-gradient(135deg, var(--danger) 0%, #e11d48 100%);
-  box-shadow: 0 14px 26px rgba(190, 18, 60, 0.2);
+  box-shadow: 0 8px 18px rgba(190, 18, 60, 0.14);
 }
 .preset-list {
   display: flex;
@@ -2674,7 +3732,7 @@ button:active {
   box-shadow: none;
 }
 .label-row-actions button:hover {
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
 }
 .dialog-backdrop {
   position: fixed;
