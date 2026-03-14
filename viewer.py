@@ -1373,7 +1373,7 @@ button:disabled {
   padding-top: 8px;
   border-top: 1px solid rgba(204, 216, 228, 0.56);
 }
-.detail-toolbar-row.secondary.hidden {
+.detail-toolbar-row.hidden {
   display: none;
 }
 .detail-toolbar label {
@@ -1463,8 +1463,8 @@ button:disabled {
   background: #eef2f7;
 }
 #detail_keyword_q {
-  flex: 1 1 280px;
-  min-width: 220px;
+  flex: 0 1 clamp(220px, 30%, 380px);
+  width: clamp(220px, 30%, 380px);
 }
 #add_session_label {
   --button-shadow: rgba(124, 58, 237, 0.18);
@@ -1894,7 +1894,7 @@ pre {
         <button id="event_selection_mode" disabled>選択モード</button>
         <button id="copy_selected_messages" disabled>選択コピー</button>
       </div>
-      <div class="detail-toolbar-row keyword">
+      <div id="detail_keyword_row" class="detail-toolbar-row keyword">
         <input id="detail_keyword_q" placeholder="detail keyword" />
         <button id="detail_keyword_filter" disabled>フィルター</button>
         <button id="detail_keyword_search" disabled>検索</button>
@@ -2017,12 +2017,14 @@ function setFiltersVisible(nextVisible){
 }
 
 function updateDetailActionsVisibility(){
-  const row = document.getElementById('detail_action_row');
+  const actionRow = document.getElementById('detail_action_row');
+  const keywordRow = document.getElementById('detail_keyword_row');
   const button = document.getElementById('toggle_detail_actions');
-  if(!row || !button){
+  if(!actionRow || !keywordRow || !button){
     return;
   }
-  row.classList.toggle('hidden', !detailActionsVisible);
+  actionRow.classList.toggle('hidden', !detailActionsVisible);
+  keywordRow.classList.toggle('hidden', !detailActionsVisible);
   button.textContent = detailActionsVisible ? 'Hide' : 'Show';
 }
 
