@@ -1044,7 +1044,6 @@ HTML_PAGE = """<!doctype html>
   --dev: #8a5a00;
   --system: #4b5563;
   --sidebar-width: 360px;
-  --splitter-width: 18px;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -1097,50 +1096,12 @@ header small { color: var(--muted); }
   transition: transform 0.16s ease, opacity 0.12s ease;
   will-change: transform;
 }
-.container.sidebar-collapsed .left {
-  transform: translateX(calc(var(--sidebar-width) * -1));
-  opacity: 0;
-  pointer-events: none;
-}
-.splitter {
-  position: absolute;
-  top: 0;
-  left: var(--sidebar-width);
-  bottom: 0;
-  width: var(--splitter-width);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(180deg, #f7fbff 0%, #edf3fa 100%);
-  border-left: 1px solid #dbe5ef;
-  border-right: 1px solid #dbe5ef;
-}
-.container.sidebar-collapsed .splitter {
-  left: 0;
-}
-.splitter-button {
-  --button-shadow: rgba(71, 85, 105, 0.08);
-  width: 14px;
-  min-width: 14px;
-  height: 52px;
-  padding: 0;
-  border-radius: 999px;
-  border-color: #b8c7d8;
-  background: #ffffff;
-  color: #475569;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
-}
 .right {
   height: 100%;
-  margin-left: calc(var(--sidebar-width) + var(--splitter-width));
+  margin-left: var(--sidebar-width);
   min-width: 0;
   display: flex;
   flex-direction: column;
-}
-.container.sidebar-collapsed .right {
-  margin-left: var(--splitter-width);
 }
 .toolbar {
   padding: 10px;
@@ -1408,6 +1369,10 @@ button:disabled {
   padding-top: 8px;
   border-top: 1px solid rgba(204, 216, 228, 0.72);
 }
+.detail-toolbar-row.keyword {
+  padding-top: 8px;
+  border-top: 1px solid rgba(204, 216, 228, 0.56);
+}
 .detail-toolbar-row.secondary.hidden {
   display: none;
 }
@@ -1469,6 +1434,38 @@ button:disabled {
   background: #94a3b8;
   cursor: not-allowed;
 }
+.detail-toolbar #detail_keyword_filter {
+  --button-shadow: rgba(21, 128, 61, 0.14);
+  background: #15803d;
+}
+.detail-toolbar #detail_keyword_filter.active {
+  background: #166534;
+}
+.detail-toolbar #detail_keyword_search {
+  --button-shadow: rgba(217, 119, 6, 0.16);
+  background: #d97706;
+}
+.detail-toolbar #detail_keyword_search.active {
+  background: #b45309;
+}
+.detail-toolbar #detail_keyword_prev,
+.detail-toolbar #detail_keyword_next {
+  --button-shadow: rgba(71, 85, 105, 0.11);
+  background: #475569;
+}
+.detail-toolbar #detail_keyword_clear {
+  --button-shadow: rgba(71, 85, 105, 0.08);
+  background: #f8fafc;
+  color: #475569;
+  border-color: #94a3b8;
+}
+.detail-toolbar #detail_keyword_clear:hover:not(:disabled) {
+  background: #eef2f7;
+}
+#detail_keyword_q {
+  flex: 1 1 280px;
+  min-width: 220px;
+}
 #add_session_label {
   --button-shadow: rgba(124, 58, 237, 0.18);
   background: #7c3aed;
@@ -1495,10 +1492,6 @@ button:disabled {
   padding: 14px;
   overflow: auto;
   height: 100%;
-}
-.event-spacer {
-  height: 0;
-  pointer-events: none;
 }
 .status-wrap {
   min-height: 100%;
@@ -1588,9 +1581,6 @@ button:disabled {
   padding: 10px;
   margin-bottom: 10px;
   background: #fbfdff;
-  contain: layout paint;
-  content-visibility: auto;
-  contain-intrinsic-size: 320px;
 }
 .ev.user { border-left-color: var(--user); background: #e7f1ff; }
 .ev.user_context { border-left-color: #7f8ea0; background: #f5f7fa; }
@@ -1603,6 +1593,16 @@ button:disabled {
 .ev.copy-selected {
   outline: 2px solid rgba(37, 99, 235, 0.24);
   outline-offset: 1px;
+}
+.detail-keyword-hit {
+  background: #fde68a;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 3px;
+}
+.detail-keyword-hit.current {
+  background: #f59e0b;
+  color: #1f2937;
 }
 .ev-head {
   display: flex;
@@ -1793,7 +1793,6 @@ pre {
     grid-template-rows: 0 1fr;
   }
   .left,
-  .splitter,
   .right {
     position: static;
     top: auto;
@@ -1822,9 +1821,6 @@ pre {
   }
   .container.sidebar-collapsed .right {
     margin-left: 0;
-  }
-  .splitter {
-    display: none;
   }
 }
 </style>
@@ -1877,9 +1873,6 @@ pre {
       <div id="sessions_status" class="status-layer hidden" aria-live="polite"></div>
     </div>
   </aside>
-  <div class="splitter">
-    <button id="toggle_session_list" class="splitter-button" aria-label="左ペインを隠す" title="左ペインを隠す">&lt;</button>
-  </div>
   <main class="right">
     <div class="meta" id="meta">セッションを選択してください</div>
     <div class="detail-toolbar">
@@ -1900,6 +1893,14 @@ pre {
         <button id="copy_displayed_messages" disabled>表示中メッセージコピー</button>
         <button id="event_selection_mode" disabled>選択モード</button>
         <button id="copy_selected_messages" disabled>選択コピー</button>
+      </div>
+      <div class="detail-toolbar-row keyword">
+        <input id="detail_keyword_q" placeholder="detail keyword" />
+        <button id="detail_keyword_filter" disabled>フィルター</button>
+        <button id="detail_keyword_search" disabled>検索</button>
+        <button id="detail_keyword_prev" disabled>前へ</button>
+        <button id="detail_keyword_next" disabled>次へ</button>
+        <button id="detail_keyword_clear" disabled>Keyword Clear</button>
       </div>
     </div>
     <div class="session-label-strip empty" id="session_label_strip">セッションラベルはまだありません</div>
@@ -1933,23 +1934,25 @@ const state = {
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
 const SEARCH_DEBOUNCE_MS = 180;
 const BUTTON_FEEDBACK_MS = 1200;
-const DETAIL_VIRTUALIZE_AFTER = 180;
-const DETAIL_VIRTUAL_OVERSCAN_PX = 900;
-const DETAIL_ESTIMATED_EVENT_HEIGHT = 240;
-const DETAIL_EVENT_VERTICAL_GAP = 10;
+const DETAIL_INTERACTION_LOCK_MS = 4000;
 let loadSessionsTimer = null;
 let loadSessionsRequestSeq = 0;
 let loadSessionDetailRequestSeq = 0;
 let saveFiltersFrame = 0;
-let detailListRenderFrame = 0;
-let detailMeasureFrame = 0;
-let detailHeightCache = new Map();
-let detailKnownWidth = 0;
+let deferredDetailSyncTimer = 0;
 let labelManagerWindow = null;
 let labelPickerHandler = null;
 let filtersVisible = true;
 let detailActionsVisible = true;
 let leftPaneVisible = true;
+let pendingAutomaticDetailSync = false;
+let detailPointerDown = false;
+let detailInteractionLockUntil = 0;
+let detailKeywordFilterTerm = '';
+let detailKeywordSearchTerm = '';
+let detailKeywordCurrentMatchIndex = -1;
+let pendingDetailKeywordFocusIndex = -1;
+let detailKeywordSearchTotal = 0;
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -1990,8 +1993,9 @@ function updateReloadButtonState(){
   if(!button){
     return;
   }
-  button.disabled = state.isSessionsLoading;
-  button.textContent = state.isSessionsLoading && state.sessionsLoadMode === 'reload' ? 'Reloading...' : 'Reload';
+  const isManualReload = state.isSessionsLoading && state.sessionsLoadMode === 'reload';
+  button.disabled = isManualReload;
+  button.textContent = isManualReload ? 'Reloading...' : 'Reload';
 }
 
 function updateFilterVisibility(){
@@ -2030,16 +2034,13 @@ function setDetailActionsVisible(nextVisible){
 
 function updateLeftPaneVisibility(){
   const container = document.querySelector('.container');
-  const splitterButton = document.getElementById('toggle_session_list');
   const mobileButton = document.getElementById('toggle_session_list_mobile');
-  if(!container || !splitterButton){
+  const isMobileLayout = window.matchMedia('(max-width: 900px)').matches;
+  if(!container){
     return;
   }
-  container.classList.toggle('sidebar-collapsed', !leftPaneVisible);
-  splitterButton.textContent = leftPaneVisible ? '<' : '>';
+  container.classList.toggle('sidebar-collapsed', isMobileLayout && !leftPaneVisible);
   const label = leftPaneVisible ? '左ペインを隠す' : '左ペインを表示';
-  splitterButton.title = label;
-  splitterButton.setAttribute('aria-label', label);
   if(mobileButton){
     mobileButton.textContent = leftPaneVisible ? '一覧を隠す' : '一覧を表示';
     mobileButton.setAttribute('aria-label', label);
@@ -2050,8 +2051,6 @@ function updateLeftPaneVisibility(){
 function setLeftPaneVisible(nextVisible){
   leftPaneVisible = !!nextVisible;
   updateLeftPaneVisibility();
-  resetDetailVirtualState();
-  scheduleDetailListRender();
   saveFiltersSoon();
 }
 
@@ -2171,51 +2170,6 @@ function renderSessionLabelStrip(){
   updateSessionLabelButtonState();
 }
 
-function cancelScheduledDetailListRender(){
-  if(detailListRenderFrame){
-    cancelAnimationFrame(detailListRenderFrame);
-    detailListRenderFrame = 0;
-  }
-}
-
-function cancelScheduledDetailMeasure(){
-  if(detailMeasureFrame){
-    cancelAnimationFrame(detailMeasureFrame);
-    detailMeasureFrame = 0;
-  }
-}
-
-function resetDetailVirtualState(options){
-  cancelScheduledDetailListRender();
-  cancelScheduledDetailMeasure();
-  if(!options || options.clearHeights !== false){
-    detailHeightCache = new Map();
-    detailKnownWidth = 0;
-  }
-}
-
-function scheduleDetailListRender(){
-  if(detailListRenderFrame){
-    return;
-  }
-  detailListRenderFrame = requestAnimationFrame(() => {
-    detailListRenderFrame = 0;
-    renderActiveEventList();
-  });
-}
-
-function scheduleDetailCardMeasurement(){
-  cancelScheduledDetailMeasure();
-  detailMeasureFrame = requestAnimationFrame(() => {
-    detailMeasureFrame = 0;
-    measureVisibleDetailEventCards();
-  });
-}
-
-function shouldVirtualizeDetailEvents(events){
-  return Array.isArray(events) && events.length >= DETAIL_VIRTUALIZE_AFTER;
-}
-
 function getDetailEventKey(ev, fallbackIndex){
   if(ev && ev.event_id){
     return String(ev.event_id);
@@ -2223,76 +2177,15 @@ function getDetailEventKey(ev, fallbackIndex){
   return `${ev && ev.kind ? ev.kind : 'event'}:${ev && ev.timestamp ? ev.timestamp : ''}:${fallbackIndex}`;
 }
 
-function getCachedDetailEventHeight(eventKey){
-  return detailHeightCache.get(eventKey) || DETAIL_ESTIMATED_EVENT_HEIGHT;
-}
-
-function syncDetailHeightCacheWithWidth(eventsBox){
-  const width = Math.round(eventsBox && eventsBox.clientWidth ? eventsBox.clientWidth : 0);
-  if(width <= 0){
-    return;
-  }
-  if(detailKnownWidth && Math.abs(detailKnownWidth - width) > 24){
-    detailHeightCache = new Map();
-  }
-  detailKnownWidth = width;
-}
-
-function getVirtualizedDetailWindow(displayEvents, scrollTop, viewportHeight){
-  const startBoundary = Math.max(0, scrollTop - DETAIL_VIRTUAL_OVERSCAN_PX);
-  const endBoundary = scrollTop + viewportHeight + DETAIL_VIRTUAL_OVERSCAN_PX;
-  let cursor = 0;
-  let topHeight = 0;
-  let startIndex = 0;
-  let endIndex = displayEvents.length;
-
-  for(let index = 0; index < displayEvents.length; index++){
-    const height = getCachedDetailEventHeight(getDetailEventKey(displayEvents[index], index));
-    const nextCursor = cursor + height;
-    if(nextCursor < startBoundary){
-      topHeight = nextCursor;
-      startIndex = index + 1;
-      cursor = nextCursor;
-      continue;
-    }
-    cursor = nextCursor;
-    if(endIndex === displayEvents.length && cursor >= endBoundary){
-      endIndex = index + 1;
-    }
-  }
-
-  if(endIndex <= startIndex && displayEvents.length){
-    endIndex = Math.min(displayEvents.length, startIndex + 1);
-  }
-
-  let visibleHeight = 0;
-  for(let index = startIndex; index < endIndex; index++){
-    visibleHeight += getCachedDetailEventHeight(getDetailEventKey(displayEvents[index], index));
-  }
-
-  return {
-    startIndex,
-    endIndex,
-    topHeight,
-    bottomHeight: Math.max(0, cursor - topHeight - visibleHeight),
-  };
-}
-
-function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex){
+function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta){
   const role = ev.role || 'system';
   const roleLabel = role.replace('_', ' ');
   const labels = ev.labels || [];
   const matchesSelectedLabel = selectedEventLabelId && labels.some(label => String(label.id) === selectedEventLabelId);
-  let body = '';
-  if(ev.kind === 'message' || ev.kind === 'agent_update'){
-    body = `<pre>${esc(ev.text || '')}</pre>`;
-  } else if(ev.kind === 'function_call'){
-    body = `<pre>name: ${esc(ev.name)}\n${esc(ev.arguments || '')}</pre>`;
-  } else if(ev.kind === 'function_output'){
-    body = `<pre>${esc(ev.output || '')}</pre>`;
-  } else {
-    body = `<pre>${esc(JSON.stringify(ev, null, 2))}</pre>`;
-  }
+  const eventKey = getDetailEventKey(ev, fallbackIndex);
+  const bodyText = getEventBodyText(ev);
+  const eventMatches = searchMeta && searchMeta.matchesByEvent ? (searchMeta.matchesByEvent.get(eventKey) || []) : [];
+  const body = `<pre>${renderHighlightedEventBody(bodyText, eventMatches)}</pre>`;
   const selectionKey = getEventSelectionKey(ev);
   const isSelectable = state.isEventSelectionMode && isSelectableMessageEvent(ev);
   const isSelected = selectionKey && state.selectedEventIds.has(selectionKey);
@@ -2303,7 +2196,7 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex){
   const copyButtonHtml = ev.kind === 'message'
     ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">コピー</button>`
     : '';
-  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''}" data-virtual-key="${esc(getDetailEventKey(ev, fallbackIndex))}"><div class="ev-head">${selectionCheckboxHtml}<span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>ラベル追加</button>${copyButtonHtml}</span></div>${body}</div>`;
+  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''}"><div class="ev-head">${selectionCheckboxHtml}<span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>ラベル追加</button>${copyButtonHtml}</span></div>${body}</div>`;
 }
 
 function attachVisibleEventCardHandlers(eventsBox){
@@ -2329,71 +2222,20 @@ function attachVisibleEventCardHandlers(eventsBox){
   });
 }
 
-function measureVisibleDetailEventCards(){
-  const eventsBox = document.getElementById('events');
-  if(!eventsBox || eventsBox.dataset.virtualized !== '1'){
-    return;
-  }
-  let changed = false;
-  eventsBox.querySelectorAll('.ev[data-virtual-key]').forEach(card => {
-    const eventKey = card.dataset.virtualKey;
-    const nextHeight = Math.ceil(card.getBoundingClientRect().height) + DETAIL_EVENT_VERTICAL_GAP;
-    if(!eventKey || !Number.isFinite(nextHeight) || nextHeight <= 0){
-      return;
-    }
-    const previousHeight = detailHeightCache.get(eventKey);
-    if(previousHeight == null || Math.abs(previousHeight - nextHeight) > 2){
-      detailHeightCache.set(eventKey, nextHeight);
-      changed = true;
-    }
-  });
-  if(changed){
-    scheduleDetailListRender();
-  }
-}
-
-function renderEventList(eventsBox, displayEvents, selectedEventLabelId){
+function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchMeta){
+  const targetMatch = searchMeta && pendingDetailKeywordFocusIndex >= 0
+    ? searchMeta.matches[pendingDetailKeywordFocusIndex] || null
+    : null;
   const previousScrollTop = eventsBox.scrollTop;
-  syncDetailHeightCacheWithWidth(eventsBox);
-  if(!shouldVirtualizeDetailEvents(displayEvents)){
-    cancelScheduledDetailMeasure();
-    eventsBox.dataset.virtualized = '0';
-    eventsBox.innerHTML = displayEvents.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index)).join('');
-    eventsBox.scrollTop = previousScrollTop;
-    attachVisibleEventCardHandlers(eventsBox);
-    return;
-  }
-
-  const viewportHeight = eventsBox.clientHeight || window.innerHeight || 0;
-  const windowState = getVirtualizedDetailWindow(displayEvents, previousScrollTop, viewportHeight);
-  const visibleEvents = displayEvents.slice(windowState.startIndex, windowState.endIndex);
-  const topSpacer = windowState.topHeight
-    ? `<div class="event-spacer" style="height:${Math.round(windowState.topHeight)}px"></div>`
-    : '';
-  const bottomSpacer = windowState.bottomHeight
-    ? `<div class="event-spacer" style="height:${Math.round(windowState.bottomHeight)}px"></div>`
-    : '';
-
-  eventsBox.dataset.virtualized = '1';
-  eventsBox.innerHTML =
-    topSpacer +
-    visibleEvents.map((ev, offset) => buildEventCardHtml(ev, selectedEventLabelId, windowState.startIndex + offset)).join('') +
-    bottomSpacer;
+  eventsBox.innerHTML = displayEvents.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index, searchMeta)).join('');
   eventsBox.scrollTop = previousScrollTop;
   attachVisibleEventCardHandlers(eventsBox);
-  scheduleDetailCardMeasurement();
-}
-
-function renderActiveEventList(){
-  const eventsBox = document.getElementById('events');
-  if(!eventsBox || !state.activeSession){
-    return;
+  if(targetMatch){
+    requestAnimationFrame(() => {
+      focusDetailKeywordMatch(eventsBox, pendingDetailKeywordFocusIndex);
+      pendingDetailKeywordFocusIndex = -1;
+    });
   }
-  const displayEvents = getDisplayEvents();
-  if(!displayEvents.length){
-    return;
-  }
-  renderEventList(eventsBox, displayEvents, getSelectedDetailEventLabelFilter());
 }
 
 function hideLabelPicker(){
@@ -2437,7 +2279,7 @@ async function loadLabels(reloadSessions){
   state.labels = data.labels || [];
   populateLabelControls();
   if(reloadSessions && prev !== JSON.stringify(state.labels)){
-    await loadSessions();
+    await loadSessions({ mode: 'labels' });
   }
 }
 
@@ -2526,6 +2368,264 @@ function waitForUiFeedback(duration){
   return new Promise(resolve => {
     setTimeout(resolve, duration || BUTTON_FEEDBACK_MS);
   });
+}
+
+function getDetailKeywordInputValue(){
+  const input = document.getElementById('detail_keyword_q');
+  return input ? input.value : '';
+}
+
+function stringifyEventBodyValue(value){
+  if(value == null){
+    return '';
+  }
+  if(typeof value === 'string'){
+    return value;
+  }
+  if(typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'){
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value, (key, currentValue) => {
+      if(typeof currentValue === 'string' && currentValue.startsWith('data:image/')){
+        return '[image data omitted]';
+      }
+      return currentValue;
+    }, 2) || '';
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function containsLiteralKeyword(text, keyword){
+  if(!keyword){
+    return false;
+  }
+  return stringifyEventBodyValue(text).toLocaleLowerCase().includes(keyword.toLocaleLowerCase());
+}
+
+function findLiteralKeywordRanges(text, keyword){
+  if(!keyword){
+    return [];
+  }
+  const source = stringifyEventBodyValue(text);
+  const haystack = source.toLocaleLowerCase();
+  const needle = keyword.toLocaleLowerCase();
+  const ranges = [];
+  let cursor = 0;
+  while(cursor <= haystack.length - needle.length){
+    const nextIndex = haystack.indexOf(needle, cursor);
+    if(nextIndex === -1){
+      break;
+    }
+    ranges.push({ start: nextIndex, end: nextIndex + keyword.length });
+    cursor = nextIndex + Math.max(keyword.length, 1);
+  }
+  return ranges;
+}
+
+function getEventBodyText(ev){
+  if(!ev){
+    return '';
+  }
+  if(ev.kind === 'message' || ev.kind === 'agent_update'){
+    return stringifyEventBodyValue(ev.text);
+  }
+  if(ev.kind === 'function_call'){
+    return `name: ${stringifyEventBodyValue(ev.name)}\n${stringifyEventBodyValue(ev.arguments)}`;
+  }
+  if(ev.kind === 'function_output'){
+    return stringifyEventBodyValue(ev.output);
+  }
+  try {
+    return JSON.stringify(ev, null, 2) || '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function buildDetailKeywordSearchMeta(displayEvents, keyword){
+  const matches = [];
+  const matchesByEvent = new Map();
+  const rawKeyword = keyword || '';
+  if(!rawKeyword){
+    return { keyword: '', matches, matchesByEvent, total: 0 };
+  }
+  displayEvents.forEach((ev, eventIndex) => {
+    const eventKey = getDetailEventKey(ev, eventIndex);
+    const ranges = findLiteralKeywordRanges(getEventBodyText(ev), rawKeyword);
+    if(!ranges.length){
+      return;
+    }
+    const eventMatches = ranges.map(range => {
+      const match = {
+        eventKey,
+        eventIndex,
+        start: range.start,
+        end: range.end,
+        globalIndex: matches.length,
+      };
+      matches.push(match);
+      return match;
+    });
+    matchesByEvent.set(eventKey, eventMatches);
+  });
+  return {
+    keyword: rawKeyword,
+    matches,
+    matchesByEvent,
+    total: matches.length,
+  };
+}
+
+function normalizeDetailKeywordSearchPosition(searchMeta){
+  if(!searchMeta.total){
+    detailKeywordCurrentMatchIndex = -1;
+    pendingDetailKeywordFocusIndex = -1;
+    return;
+  }
+  if(detailKeywordCurrentMatchIndex < 0 || detailKeywordCurrentMatchIndex >= searchMeta.total){
+    detailKeywordCurrentMatchIndex = 0;
+  }
+  if(pendingDetailKeywordFocusIndex >= searchMeta.total){
+    pendingDetailKeywordFocusIndex = -1;
+  }
+}
+
+function renderHighlightedEventBody(text, eventMatches){
+  if(!Array.isArray(eventMatches) || !eventMatches.length){
+    return esc(text || '');
+  }
+  let cursor = 0;
+  let html = '';
+  const source = text || '';
+  eventMatches.forEach(match => {
+    html += esc(source.slice(cursor, match.start));
+    const currentClass = match.globalIndex === detailKeywordCurrentMatchIndex ? ' current' : '';
+    html += `<mark class="detail-keyword-hit${currentClass}" data-search-match-index="${match.globalIndex}">${esc(source.slice(match.start, match.end))}</mark>`;
+    cursor = match.end;
+  });
+  html += esc(source.slice(cursor));
+  return html;
+}
+
+function updateDetailKeywordControls(searchMeta){
+  const input = document.getElementById('detail_keyword_q');
+  const filterButton = document.getElementById('detail_keyword_filter');
+  const searchButton = document.getElementById('detail_keyword_search');
+  const prevButton = document.getElementById('detail_keyword_prev');
+  const nextButton = document.getElementById('detail_keyword_next');
+  const clearButton = document.getElementById('detail_keyword_clear');
+  if(!input || !filterButton || !searchButton || !prevButton || !nextButton || !clearButton){
+    return;
+  }
+  const hasActiveSession = !!state.activeSession;
+  const hasInputValue = getDetailKeywordInputValue() !== '';
+  const searchTotal = searchMeta && typeof searchMeta.total === 'number' ? searchMeta.total : detailKeywordSearchTotal;
+  const hasSearchMatches = searchTotal > 0;
+  const hasKeywordState = hasInputValue || detailKeywordFilterTerm !== '' || detailKeywordSearchTerm !== '';
+  input.disabled = !hasActiveSession;
+  filterButton.disabled = !hasActiveSession || !hasInputValue;
+  searchButton.disabled = !hasActiveSession || !hasInputValue;
+  prevButton.disabled = !hasSearchMatches;
+  nextButton.disabled = !hasSearchMatches;
+  clearButton.disabled = !hasKeywordState;
+  filterButton.classList.toggle('active', hasActiveSession && detailKeywordFilterTerm !== '');
+  searchButton.classList.toggle('active', hasActiveSession && detailKeywordSearchTerm !== '');
+}
+
+function resetDetailKeywordState(){
+  detailKeywordFilterTerm = '';
+  detailKeywordSearchTerm = '';
+  detailKeywordCurrentMatchIndex = -1;
+  pendingDetailKeywordFocusIndex = -1;
+  detailKeywordSearchTotal = 0;
+}
+
+function focusDetailKeywordMatch(eventsBox, matchIndex){
+  if(matchIndex < 0){
+    return;
+  }
+  const target = eventsBox.querySelector(`.detail-keyword-hit[data-search-match-index="${matchIndex}"]`);
+  if(target){
+    target.scrollIntoView({ block: 'center', inline: 'nearest' });
+  }
+}
+
+function isAutomaticSessionsLoadMode(mode){
+  return mode === 'auto' || mode === 'focus' || mode === 'labels';
+}
+
+function shouldSyncActiveSessionAfterListLoad(mode){
+  return mode !== 'auto';
+}
+
+function clearDeferredDetailSyncTimer(){
+  if(deferredDetailSyncTimer){
+    clearTimeout(deferredDetailSyncTimer);
+    deferredDetailSyncTimer = 0;
+  }
+}
+
+function noteDetailInteraction(){
+  detailInteractionLockUntil = Date.now() + DETAIL_INTERACTION_LOCK_MS;
+}
+
+function hasDetailTextSelection(){
+  const eventsBox = document.getElementById('events');
+  const selection = window.getSelection ? window.getSelection() : null;
+  if(!eventsBox || !selection || selection.isCollapsed || selection.rangeCount === 0){
+    return false;
+  }
+  const anchorNode = selection.anchorNode;
+  const focusNode = selection.focusNode;
+  return Boolean(
+    (anchorNode && eventsBox.contains(anchorNode)) ||
+    (focusNode && eventsBox.contains(focusNode))
+  );
+}
+
+function hasRecentDetailInteraction(){
+  return detailPointerDown || hasDetailTextSelection() || Date.now() < detailInteractionLockUntil;
+}
+
+function syncActiveSessionSummaryFromList(path){
+  if(!path){
+    return;
+  }
+  const summary = (state.sessions || []).find(session => session.path === path);
+  if(!summary){
+    return;
+  }
+  state.activeSession = {
+    ...(state.activeSession || {}),
+    ...summary,
+  };
+}
+
+async function maybeRunDeferredAutomaticDetailSync(){
+  if(!pendingAutomaticDetailSync){
+    return;
+  }
+  if(!document.hasFocus() || hasRecentDetailInteraction() || state.isDetailLoading || !state.activePath){
+    scheduleDeferredAutomaticDetailSync();
+    return;
+  }
+  pendingAutomaticDetailSync = false;
+  clearDeferredDetailSyncTimer();
+  await openSession(state.activePath, { mode: 'sync' });
+}
+
+function scheduleDeferredAutomaticDetailSync(){
+  clearDeferredDetailSyncTimer();
+  if(!pendingAutomaticDetailSync){
+    return;
+  }
+  const waitMs = Math.max(0, detailInteractionLockUntil - Date.now()) + 80;
+  deferredDetailSyncTimer = setTimeout(() => {
+    deferredDetailSyncTimer = 0;
+    void maybeRunDeferredAutomaticDetailSync();
+  }, waitMs);
 }
 
 async function copyTextToClipboard(text){
@@ -2628,8 +2728,9 @@ function updateCopySelectedMessagesButtonState(){
 
 function updateRefreshDetailButtonState(){
   const button = document.getElementById('refresh_detail');
-  button.disabled = !state.activePath || state.isDetailLoading;
-  if(!state.isDetailLoading || state.detailLoadMode !== 'refresh'){
+  const isManualRefresh = state.isDetailLoading && state.detailLoadMode === 'refresh';
+  button.disabled = !state.activePath || isManualRefresh;
+  if(!isManualRefresh){
     button.textContent = 'Refresh';
     return;
   }
@@ -2715,7 +2816,22 @@ async function loadSessions(options){
     if(state.activePath){
       const exists = state.sessions.some(s => s.path === state.activePath);
       if(exists){
-        await openSession(state.activePath, { mode: 'sync' });
+        syncActiveSessionSummaryFromList(state.activePath);
+        if(shouldSyncActiveSessionAfterListLoad(loadMode)){
+          if(isAutomaticSessionsLoadMode(loadMode) && hasRecentDetailInteraction()){
+            pendingAutomaticDetailSync = true;
+            renderSessionList();
+            renderActiveSession();
+            scheduleDeferredAutomaticDetailSync();
+          } else {
+            pendingAutomaticDetailSync = false;
+            clearDeferredDetailSyncTimer();
+            await openSession(state.activePath, { mode: 'sync' });
+          }
+        } else {
+          renderSessionList();
+          renderActiveSession();
+        }
       } else {
         state.activePath = null;
         state.activeSession = null;
@@ -2724,6 +2840,8 @@ async function loadSessions(options){
         state.detailError = '';
         state.detailLoadMode = '';
         clearSelectedEventIds();
+        pendingAutomaticDetailSync = false;
+        clearDeferredDetailSyncTimer();
         renderSessionList();
         renderActiveSession();
       }
@@ -2920,6 +3038,9 @@ function getDisplayEvents(){
       return (showOnlyUser && ev.role === 'user') || (showOnlyAssistant && ev.role === 'assistant');
     });
   }
+  if(detailKeywordFilterTerm !== ''){
+    events = events.filter(ev => containsLiteralKeyword(getEventBodyText(ev), detailKeywordFilterTerm));
+  }
   if(document.getElementById('reverse_order').checked){
     events = [...events].reverse();
   }
@@ -2944,7 +3065,7 @@ async function removeSessionLabel(labelId){
     alert(data.error);
     return;
   }
-  await loadSessions();
+  await loadSessions({ mode: 'labels' });
 }
 
 async function addSessionLabelFromButton(button){
@@ -2958,7 +3079,7 @@ async function addSessionLabelFromButton(button){
       alert(data.error);
       return;
     }
-    await loadSessions();
+    await loadSessions({ mode: 'labels' });
   });
 }
 
@@ -2974,7 +3095,7 @@ async function addEventLabelFromButton(button, eventId){
       alert(data.error);
       return;
     }
-    await loadSessions();
+    await loadSessions({ mode: 'labels' });
   });
 }
 
@@ -2989,7 +3110,7 @@ async function removeEventLabel(eventId, labelId){
     alert(data.error);
     return;
   }
-  await loadSessions();
+  await loadSessions({ mode: 'labels' });
 }
 
 async function copyDisplayedMessages(){
@@ -3056,13 +3177,62 @@ function updateEventSelection(eventId, checked, card){
   updateCopySelectedMessagesButtonState();
 }
 
+function applyDetailKeywordFilter(){
+  noteDetailInteraction();
+  detailKeywordFilterTerm = getDetailKeywordInputValue();
+  const eventsBox = document.getElementById('events');
+  if(eventsBox){
+    eventsBox.scrollTop = 0;
+  }
+  renderActiveSession();
+}
+
+function runDetailKeywordSearch(){
+  noteDetailInteraction();
+  detailKeywordSearchTerm = getDetailKeywordInputValue();
+  const searchMeta = buildDetailKeywordSearchMeta(getDisplayEvents(), detailKeywordSearchTerm);
+  detailKeywordSearchTotal = searchMeta.total;
+  detailKeywordCurrentMatchIndex = searchMeta.total ? 0 : -1;
+  pendingDetailKeywordFocusIndex = detailKeywordCurrentMatchIndex;
+  renderActiveSession();
+}
+
+function moveDetailKeywordSearch(step){
+  noteDetailInteraction();
+  const searchMeta = buildDetailKeywordSearchMeta(getDisplayEvents(), detailKeywordSearchTerm);
+  detailKeywordSearchTotal = searchMeta.total;
+  if(!searchMeta.total){
+    detailKeywordCurrentMatchIndex = -1;
+    pendingDetailKeywordFocusIndex = -1;
+    renderActiveSession();
+    return;
+  }
+  if(detailKeywordCurrentMatchIndex < 0 || detailKeywordCurrentMatchIndex >= searchMeta.total){
+    detailKeywordCurrentMatchIndex = 0;
+  } else {
+    detailKeywordCurrentMatchIndex = (detailKeywordCurrentMatchIndex + step + searchMeta.total) % searchMeta.total;
+  }
+  pendingDetailKeywordFocusIndex = detailKeywordCurrentMatchIndex;
+  renderActiveSession();
+}
+
+function clearDetailKeyword(){
+  noteDetailInteraction();
+  const input = document.getElementById('detail_keyword_q');
+  if(input){
+    input.value = '';
+  }
+  resetDetailKeywordState();
+  renderActiveSession();
+}
+
 function renderActiveSession(){
   const meta = document.getElementById('meta');
   const eventsBox = document.getElementById('events');
   updateRefreshDetailButtonState();
   if(!state.activeSession){
-    resetDetailVirtualState({ clearHeights: false });
-    eventsBox.dataset.virtualized = '0';
+    detailKeywordSearchTotal = 0;
+    normalizeDetailKeywordSearchPosition({ total: 0 });
     if(state.isDetailLoading && state.activePath){
       meta.textContent = 'セッション詳細を読み込み中...';
       eventsBox.innerHTML = renderInlineStatus(
@@ -3086,6 +3256,7 @@ function renderActiveSession(){
     updateDisplayedMessagesCopyButtonState();
     updateEventSelectionModeButtonState();
     updateCopySelectedMessagesButtonState();
+    updateDetailKeywordControls({ total: 0 });
     renderSessionLabelStrip();
     updateSessionLabelButtonState();
     return;
@@ -3093,6 +3264,9 @@ function renderActiveSession(){
 
   syncSelectedEventIdsToActiveEvents();
   const displayEvents = getDisplayEvents();
+  const searchMeta = buildDetailKeywordSearchMeta(displayEvents, detailKeywordSearchTerm);
+  detailKeywordSearchTotal = searchMeta.total;
+  normalizeDetailKeywordSearchPosition(searchMeta);
   const source = normalizeSource(state.activeSession.source);
   const eventsSummary = state.isDetailLoading && state.activeEvents.length === 0
     ? 'events: loading...'
@@ -3107,24 +3281,18 @@ function renderActiveSession(){
     `path: <code class="path-code">${highlightSessionPath(state.activeSession.relative_path)}</code> | cwd: <code class="cwd-code">${esc(state.activeSession.cwd || '-')}</code> | time: <code class="time-code">${esc(fmt(state.activeSession.started_at || state.activeSession.mtime))}</code> | source: <code class="source-code source-${esc(source)}">${esc(sourceLabel(source))}</code> | ${eventsSummary} | raw lines: ${rawSummary}${errorNote}`;
 
   if(state.isDetailLoading && state.activeEvents.length === 0){
-    resetDetailVirtualState({ clearHeights: false });
-    eventsBox.dataset.virtualized = '0';
     eventsBox.innerHTML = renderInlineStatus(
       'セッション詳細を読み込み中...',
       'イベントを取得しています。',
       'loading'
     );
   } else if(state.detailError && state.activeEvents.length === 0){
-    resetDetailVirtualState({ clearHeights: false });
-    eventsBox.dataset.virtualized = '0';
     eventsBox.innerHTML = renderInlineStatus(
       '詳細の取得に失敗しました',
       state.detailError,
       'error'
     );
   } else if(displayEvents.length === 0){
-    resetDetailVirtualState({ clearHeights: false });
-    eventsBox.dataset.virtualized = '0';
     eventsBox.innerHTML = state.activeEvents.length === 0
       ? renderInlineStatus(
           '表示できるイベントはありません',
@@ -3137,7 +3305,7 @@ function renderActiveSession(){
           'empty'
         );
   } else {
-    renderEventList(eventsBox, displayEvents, getSelectedDetailEventLabelFilter());
+    renderEventList(eventsBox, displayEvents, getSelectedDetailEventLabelFilter(), searchMeta);
   }
   if(state.isDetailLoading && state.activeEvents.length > 0 && state.detailLoadMode === 'refresh'){
     setStatusLayer(
@@ -3154,6 +3322,7 @@ function renderActiveSession(){
   updateDisplayedMessagesCopyButtonState();
   updateEventSelectionModeButtonState();
   updateCopySelectedMessagesButtonState();
+  updateDetailKeywordControls(searchMeta);
   updateCopyResumeButtonState();
 }
 
@@ -3162,6 +3331,10 @@ async function openSession(path, options){
   const nextSession = state.sessions.find(s => s.path === path) || null;
   const previousPath = state.activeSession && state.activeSession.path ? state.activeSession.path : state.activePath;
   const loadMode = options && options.mode ? options.mode : 'open';
+  if(loadMode !== 'sync'){
+    pendingAutomaticDetailSync = false;
+    clearDeferredDetailSyncTimer();
+  }
   state.activePath = path;
   state.isDetailLoading = true;
   state.detailError = '';
@@ -3176,7 +3349,6 @@ async function openSession(path, options){
     state.activeEvents = [];
     state.activeRawLineCount = 0;
     clearSelectedEventIds();
-    resetDetailVirtualState();
   }
   renderSessionList();
   renderActiveSession();
@@ -3227,14 +3399,10 @@ document.getElementById('session_label_filter').addEventListener('change', sched
 document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('detail_event_label_filter').addEventListener('change', () => {
   saveFilters();
-  resetDetailVirtualState({ clearHeights: false });
   renderActiveSession();
 });
 document.getElementById('toggle_filters').addEventListener('click', () => {
   setFiltersVisible(!filtersVisible);
-});
-document.getElementById('toggle_session_list').addEventListener('click', () => {
-  setLeftPaneVisible(!leftPaneVisible);
 });
 document.getElementById('toggle_session_list_mobile').addEventListener('click', () => {
   setLeftPaneVisible(!leftPaneVisible);
@@ -3251,15 +3419,12 @@ document.getElementById('reload').addEventListener('click', () => {
 });
 document.getElementById('clear').addEventListener('click', clearFilters);
 document.getElementById('only_user_instruction').addEventListener('change', () => {
-  resetDetailVirtualState({ clearHeights: false });
   renderActiveSession();
 });
 document.getElementById('only_ai_response').addEventListener('change', () => {
-  resetDetailVirtualState({ clearHeights: false });
   renderActiveSession();
 });
 document.getElementById('reverse_order').addEventListener('change', () => {
-  resetDetailVirtualState({ clearHeights: false });
   renderActiveSession();
 });
 document.getElementById('refresh_detail').addEventListener('click', refreshActiveSession);
@@ -3267,15 +3432,56 @@ document.getElementById('copy_resume_command').addEventListener('click', copyRes
 document.getElementById('copy_displayed_messages').addEventListener('click', copyDisplayedMessages);
 document.getElementById('event_selection_mode').addEventListener('click', toggleEventSelectionMode);
 document.getElementById('copy_selected_messages').addEventListener('click', copySelectedMessages);
+document.getElementById('detail_keyword_q').addEventListener('input', () => {
+  updateDetailKeywordControls();
+});
+document.getElementById('detail_keyword_q').addEventListener('keydown', (event) => {
+  if(event.key === 'Enter' && !event.isComposing){
+    event.preventDefault();
+    runDetailKeywordSearch();
+  }
+});
+document.getElementById('detail_keyword_filter').addEventListener('click', applyDetailKeywordFilter);
+document.getElementById('detail_keyword_search').addEventListener('click', runDetailKeywordSearch);
+document.getElementById('detail_keyword_prev').addEventListener('click', () => {
+  moveDetailKeywordSearch(-1);
+});
+document.getElementById('detail_keyword_next').addEventListener('click', () => {
+  moveDetailKeywordSearch(1);
+});
+document.getElementById('detail_keyword_clear').addEventListener('click', clearDetailKeyword);
 document.getElementById('add_session_label').addEventListener('click', async (event) => {
   await addSessionLabelFromButton(event.currentTarget);
 });
-document.getElementById('events').addEventListener('scroll', () => {
-  const eventsBox = document.getElementById('events');
-  if(!eventsBox || eventsBox.dataset.virtualized !== '1'){
+document.addEventListener('keydown', (event) => {
+  const key = (event.key || '').toLowerCase();
+  const isFindKey = (event.ctrlKey || event.metaKey) && key === 'f';
+  const isFindNextKey = event.key === 'F3';
+  if((isFindKey || isFindNextKey) && state.activeSession){
+    event.preventDefault();
+    noteDetailInteraction();
+  }
+});
+document.getElementById('events').addEventListener('pointerdown', (event) => {
+  if(event.target.closest('pre')){
+    detailPointerDown = true;
+    noteDetailInteraction();
+  }
+});
+window.addEventListener('pointerup', () => {
+  if(!detailPointerDown){
     return;
   }
-  scheduleDetailListRender();
+  detailPointerDown = false;
+  noteDetailInteraction();
+  scheduleDeferredAutomaticDetailSync();
+});
+document.addEventListener('selectionchange', () => {
+  if(hasDetailTextSelection()){
+    noteDetailInteraction();
+    return;
+  }
+  scheduleDeferredAutomaticDetailSync();
 });
 document.getElementById('open_label_manager').addEventListener('click', openLabelManagerWindow);
 document.addEventListener('click', (event) => {
@@ -3296,13 +3502,13 @@ window.addEventListener('focus', async () => {
   await loadSessions({ mode: 'focus' });
 });
 window.addEventListener('resize', () => {
-  resetDetailVirtualState();
-  scheduleDetailListRender();
+  updateLeftPaneVisibility();
 });
 updateCopyResumeButtonState();
 updateDisplayedMessagesCopyButtonState();
 updateEventSelectionModeButtonState();
 updateCopySelectedMessagesButtonState();
+updateDetailKeywordControls({ total: 0 });
 updateRefreshDetailButtonState();
 updateFilterVisibility();
 restoreFilters();
