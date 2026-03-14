@@ -91,8 +91,7 @@ HOST=0.0.0.0 python3 viewer.py
     - During a manual `Reload`, the list shows an updating overlay and button state feedback
   - `Clear` resets the left-pane search conditions
   - `Hide` / `Show` collapses or expands the search filter area
-  - A toggle button between the list and the detail view can hide or show the entire left pane
-    - In vertical layout, the toggle is available from the header button: `Hide List` / `Show List`
+  - In vertical layout, the header button `Hide List` / `Show List` can hide or show the entire left pane
 - Top-left filters
   - Filter by `cwd` / date / keyword / `source` / session label / event label
   - Keyword search uses a SQLite full-text index
@@ -104,14 +103,21 @@ HOST=0.0.0.0 python3 viewer.py
 - Right pane: chronological event view for the selected session
   - Shows a loading state during the first detail load, and an updating overlay during manual `Refresh`
   - The detail header shows the `source` label (`CLI` / `VS Code`)
-  - The detail header uses a 2-row layout
-    - Row 1: display filters, `Refresh`, and `Hide` / `Show` for the action row
+  - The detail header uses a 3-row layout
+    - Row 1: display filters, `Refresh`, and `Hide` / `Show` to collapse rows 2 and 3 together
     - Row 2: copy actions, label actions, and selection-copy actions
+    - Row 3: keyword input, `Filter`, `Search`, `Previous`, `Next`, and `Keyword Clear`
   - Display options
     - `Show only user instructions`
     - `Show only AI responses`
     - `Reverse display order`
     - `event label: all` filter
+  - Keyword search
+    - `Filter`: shows only events that contain the keyword
+    - `Search`: highlights matches and lets you move through them with `Previous` / `Next`
+    - `Keyword Clear`: clears the input, filter state, and search state together
+    - Matching is a literal substring match, not AND / OR parsing
+    - Search targets include `message`, `function_call`, `function_output`, and `agent_update`
   - `Refresh` reloads only the currently selected session
   - `Copy Resume Command` copies `codex resume <session_id>`
   - `Copy Displayed Messages` copies all messages currently visible under the active display filters
@@ -124,6 +130,7 @@ HOST=0.0.0.0 python3 viewer.py
   - `user` messages are shown with a light blue background, while execution context such as `AGENTS.md` and `environment_context` is shown with a gray background
   - `function_call` / `function_output`
   - `agent_update`
+  - Browser-standard `Ctrl+F` / `F3` search is disabled while the session detail view is active
 - Label Management
   - Opens in a separate window from the `Label Management` button in the upper-right
   - Manages session labels and event labels in one shared UI
