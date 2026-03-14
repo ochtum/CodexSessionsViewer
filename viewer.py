@@ -1462,9 +1462,28 @@ button:disabled {
 .detail-toolbar #detail_keyword_clear:hover:not(:disabled) {
   background: #eef2f7;
 }
+.detail-toolbar #detail_keyword_filter:disabled,
+.detail-toolbar #detail_keyword_search:disabled,
+.detail-toolbar #detail_keyword_prev:disabled,
+.detail-toolbar #detail_keyword_next:disabled,
+.detail-toolbar #detail_keyword_clear:disabled {
+  background: #94a3b8;
+  color: #ffffff;
+  border-color: #94a3b8;
+  cursor: not-allowed;
+}
 #detail_keyword_q {
   flex: 0 1 clamp(220px, 30%, 380px);
   width: clamp(220px, 30%, 380px);
+}
+#detail_keyword_q:disabled {
+  background: #eef2f7;
+  color: #94a3b8;
+  border-color: #cbd5e1;
+  cursor: not-allowed;
+}
+#detail_keyword_q:disabled::placeholder {
+  color: #94a3b8;
 }
 #add_session_label {
   --button-shadow: rgba(124, 58, 237, 0.18);
