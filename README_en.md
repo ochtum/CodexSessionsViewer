@@ -130,7 +130,6 @@ HOST=0.0.0.0 python3 viewer.py
   - `user` messages are shown with a light blue background, while execution context such as `AGENTS.md` and `environment_context` is shown with a gray background
   - `function_call` / `function_output`
   - `agent_update`
-  - Browser-standard `Ctrl+F` / `F3` search is disabled while the session detail view is active
 - Label Management
   - Opens in a separate window from the `Label Management` button in the upper-right
   - Manages session labels and event labels in one shared UI

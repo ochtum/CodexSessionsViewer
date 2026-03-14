@@ -130,7 +130,6 @@ HOST=0.0.0.0 python3 viewer.py
   - `user` は薄青背景、`AGENTS.md` や `environment_context` などの実行コンテキストはグレー背景で表示
   - `function_call` / `function_output`
   - `agent_update`
-  - セッション詳細表示中はブラウザ標準の `Ctrl+F` / `F3` 検索を無効化
 - ラベル管理
   - 右上の「ラベル管理」ボタンから別ウィンドウで開く
   - セッションラベル / イベントラベルを共通管理

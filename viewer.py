@@ -3474,15 +3474,6 @@ document.getElementById('detail_keyword_clear').addEventListener('click', clearD
 document.getElementById('add_session_label').addEventListener('click', async (event) => {
   await addSessionLabelFromButton(event.currentTarget);
 });
-document.addEventListener('keydown', (event) => {
-  const key = (event.key || '').toLowerCase();
-  const isFindKey = (event.ctrlKey || event.metaKey) && key === 'f';
-  const isFindNextKey = event.key === 'F3';
-  if((isFindKey || isFindNextKey) && state.activeSession){
-    event.preventDefault();
-    noteDetailInteraction();
-  }
-});
 document.getElementById('events').addEventListener('pointerdown', (event) => {
   if(event.target.closest('pre')){
     detailPointerDown = true;
