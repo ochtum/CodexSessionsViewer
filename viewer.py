@@ -1736,7 +1736,7 @@ button:disabled {
   padding: 0 6px;
 }
 .session-preview {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: var(--text-caption);
   line-height: 1.5;
   color: #354252;
@@ -1750,7 +1750,7 @@ button:disabled {
   min-width: 0;
 }
 .session-meta-row-secondary {
-  margin-top: 4px;
+  margin-top: 0;
 }
 .session-badge {
   display: inline-flex;
@@ -4732,16 +4732,15 @@ function renderSessionList(){
   } else {
     box.innerHTML = state.filtered.map(s => `
       <div class="session-item ${state.activePath === s.path ? 'active' : ''}" data-path="${esc(s.path)}">
-        <div class="session-path">${highlightSessionPath(s.relative_path)}</div>
-        <div class="session-preview">${esc(s.first_real_user_text || s.first_user_text || t('session.preview.empty'))}</div>
+        <div class="session-meta-row session-meta-row-secondary">
+          <div class="session-badge session-cwd">${esc(s.cwd || '-')}</div>
+        </div>
         <div class="session-meta-row session-meta-row-primary">
           <div class="session-badge session-time">${esc(fmt(s.started_at || s.mtime))}</div>
           <div class="session-badge session-source source-${esc(normalizeSource(s.source))}">${esc(sourceLabel(s.source))}</div>
         </div>
+        <div class="session-preview">${esc(s.first_real_user_text || s.first_user_text || t('session.preview.empty'))}</div>
         ${(s.session_labels || []).length ? `<div class="session-label-row">${renderAssignedLabels(s.session_labels || [])}</div>` : ''}
-        <div class="session-meta-row session-meta-row-secondary">
-          <div class="session-badge session-cwd">cwd: ${esc(s.cwd || '-')}</div>
-        </div>
       </div>
     `).join('');
   }
