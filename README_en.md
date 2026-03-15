@@ -19,11 +19,23 @@ If sessions exist on both the WSL side and the Windows side, it loads and lists 
 
 ![image](/image/00002.jpg)
 
+### Shortcut List Screen
+
+![image](/image/00003.jpg)
+
 ## Directory Structure
 
 ```text
 .
 ├─ viewer.py
+├─ icons
+│  ├─ codex-sessions-viewer.svg
+│  ├─ claude-sessions-viewer.svg
+│  └─ github-copilot-sessions-viewer.svg
+├─ image
+│  ├─ 00001.jpg
+│  ├─ 00002.jpg
+│  └─ 00003.jpg
 └─ scripts
    ├─ windows
    │  ├─ launch_viewer.bat
@@ -84,15 +96,19 @@ HOST=0.0.0.0 python3 viewer.py
 
 ## UI Features
 
+- Header
+  - Shows the product icon and the `Codex Sessions Viewer` title on the left
+  - Provides a language switcher in the upper-right: `日本語` / `English` / `简体中文` / `繁體中文`
+  - Includes `Label Management`, `Show meta`, `Shortcuts`, and the mobile list toggle
+  - `Show meta` is hidden by default and reveals `session root`, `path`, `cwd`, `time`, `source`, `events`, and `raw lines`
 - Left pane: session list, sorted newest first
-  - Shows session `source` labels (`CLI` / `VS Code`) and session labels in the list
-  - Shows a loading state during the initial load
-  - `Reload` reloads the session list
-    - During a manual `Reload`, the list shows an updating overlay and button state feedback
-  - `Clear` resets the left-pane search conditions
-  - `Hide` / `Show` collapses or expands the search filter area
+  - Shows a session preview, `source` labels (`CLI` / `VS Code`), session labels, `cwd`, and `id`
+  - Shows loading feedback during the initial load and manual `Reload`
+  - `Clear` resets all left-pane search and filter conditions
+  - `Show filters` / `Hide filters` collapses or expands the search and filter area
   - In vertical layout, the header button `Hide List` / `Show List` can hide or show the entire left pane
-- Top-left filters
+  - The filter area uses internal scrolling so it remains usable on smaller displays
+- Left-pane search and filters
   - Filter by `cwd` / date / keyword / `source` / session label / event label
   - Keyword search uses a SQLite full-text index
   - Search covers not only `message`, but also `function_call.arguments`, `function_output.output`, and `agent_update.message`
@@ -102,41 +118,75 @@ HOST=0.0.0.0 python3 viewer.py
     - `OR`: must include at least one space-separated keyword
 - Right pane: chronological event view for the selected session
   - Shows a loading state during the first detail load, and an updating overlay during manual `Refresh`
-  - The detail header shows the `source` label (`CLI` / `VS Code`)
-  - The detail header uses a 4-row layout
-    - Row 1: display filters, `Clear`, `Refresh`, and `Hide` / `Show` to collapse rows 2, 3, and 4 together
-    - Row 2: copy actions, label actions, and selection-copy actions
-    - Row 3: keyword input, `Filter`, `Search`, `Previous`, `Next`, and `Keyword Clear`
-    - Row 4: single-`message` anchor selection mode, clear-anchor action, and before/after message filtering
-  - Display options
-    - `Show only user instructions`
-    - `Show only AI responses`
-    - `Reverse display order`
-    - `event label: all` filter
-  - Keyword search
-    - `Filter`: shows only events that contain the keyword
-    - `Search`: highlights matches and lets you move through them with `Previous` / `Next`
-    - `Keyword Clear`: clears the input, filter state, and search state together
-    - Matching is a literal substring match, not AND / OR parsing
-    - Search targets include `message`, `function_call`, `function_output`, and `agent_update`
-  - `Clear` resets the detail-side display filters
-  - `Refresh` reloads only the currently selected session
+  - Uses a flat toolbar made up of `Display`, `Actions`, `Search`, and `Range`
+  - `Show detail actions` / `Hide detail actions` toggles the `Actions`, `Search`, and `Range` sections together
+  - Display, search, and range controls are disabled until a session is selected
+- Right-pane display and actions
+  - Display conditions: `Only user instructions`, `Only AI responses`, `Only each input and final reply`, `Reverse order`, and the compact `label` filter
+  - `Refresh` reloads only the selected session
+  - `Clear` resets the entire right-pane state
+    - Display filters
+    - Detail keyword input plus `Filter` / `Search` state
+    - Selection mode and selected messages
+    - Anchor mode, selected anchor, and before/after anchor filtering
+    - The currently open label picker
   - `Copy Resume Command` copies `codex resume <session_id>`
-  - `Copy Displayed Messages` copies all messages currently visible under the active display filters
-  - Session label display and `Add Session Label`
-  - Per-event label display / add / remove
+  - `Copy Displayed Messages` copies all visible `message` events
+  - Shows session labels and supports `Add Session Label`
+  - Supports per-event label display / add / remove
   - Each `message` event has its own `Copy` button
+- Right-pane search and selection
+  - Detail keyword search separates `Filter` from `Search`
+    - `Filter`: shows only events that contain the keyword
+    - `Search`: highlights matches and lets you move through them with `Prev` / `Next`
+    - `Clear search`: clears the input, filter state, and search state together
+  - Matching is a literal substring match, not AND / OR parsing
+  - Search targets include `message`, `function_call`, `function_output`, and `agent_update`
+  - Pressing `Enter` in the detail keyword field runs the search and releases focus so you can keep navigating with `N` / `P`
   - `Selection Mode` lets you check individual `message` events and copy them together with `Copy Selected`
-    - Even when filters are applied, already selected `message` events remain selected
+    - Already selected `message` events remain selected even when filters are applied
   - `Anchor Selection Mode` lets you choose one `message` event and filter the view to messages before or after that anchor
+- Event rendering
   - `message` (`user` / `assistant` / `developer`)
-  - `user` messages are shown with a light blue background, while execution context such as `AGENTS.md` and `environment_context` is shown with a gray background
+  - `user` messages use a light blue background, while execution context such as `AGENTS.md` and `environment_context` uses a gray background
   - `function_call` / `function_output`
   - `agent_update`
 - Label Management
-  - Opens in a separate window from the `Label Management` button in the upper-right
+  - Opens in a separate window from the upper-right `Label Management` button
+  - Shares the same language setting as the main window
   - Manages session labels and event labels in one shared UI
   - Label colors can be entered directly as `#hex`, `rgb(...)`, or `oklch(...)`, or selected from color presets
+
+## Keyboard Shortcuts
+
+Shortcuts do not run while an input is focused. Press `Esc` to close the shortcut dialog or label picker, or to leave a search field.
+
+| Key | Action |
+| --- | --- |
+| `F5` | Refresh the current list or session detail |
+| `Shift + F` | Toggle the left-pane filters |
+| `Shift + L` | Run `Clear` on the left pane |
+| `/` | Focus the search input |
+| `N` | Move to the next detail-search match |
+| `P` | Move to the previous detail-search match |
+| `M` | Toggle the `path / cwd / time` meta block |
+| `[` | Open the previous session |
+| `]` | Open the next session |
+| `1` | Toggle `Only user instructions` |
+| `2` | Toggle `Only AI responses` |
+| `3` | Toggle `Only each input and final reply` |
+| `4` | Toggle `Reverse order` |
+| `Shift + D` | Clear right-pane filters and active modes |
+| `Shift + T` | Toggle detail actions |
+| `Shift + R` | Copy the session resume command |
+| `Shift + C` | Copy displayed messages |
+| `Shift + S` | Toggle selection mode |
+| `Shift + X` | Copy selected messages |
+| `Shift + G` | Toggle anchor mode |
+| `Shift + H` | Clear the anchor |
+| `,` | Show only events before the anchor |
+| `.` | Show only events after the anchor |
+| `Esc` | Close the shortcut dialog or label picker, and leave search fields |
 
 ## Notes
 
