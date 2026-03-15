@@ -9,6 +9,9 @@ A local viewer for listing and inspecting `.jsonl` files under `~/.codex/session
 When running in WSL, if the WSL-side `~/.codex/sessions` is not found, it also auto-discovers the Windows-side location `C:\Users\<user>\.codex\sessions` (`/mnt/c/Users/<user>/.codex/sessions`).
 If sessions exist on both the WSL side and the Windows side, it loads and lists both.
 
+- This tool supports Japanese, English, Simplified Chinese, and Traditional Chinese.
+- Feedback and feature requests are welcome via issues.
+
 ## Screen Layout
 
 ### Main Screen

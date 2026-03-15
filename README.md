@@ -9,6 +9,9 @@
 WSL 実行時は、WSL 側 `~/.codex/sessions` が見つからない場合に Windows 側 `C:\Users\<user>\.codex\sessions`（`/mnt/c/Users/<user>/.codex/sessions`）も自動探索します。
 WSL 側と Windows 側の両方にセッションがある場合は、両方を読み込んで一覧化します。
 
+- 本ツールは 日本語 / English / 简体中文 / 繁體中文 に対応しています。
+- ご意見、ご要望はご遠慮なく issue に投稿ください。
+
 ## 画面構成
 
 ### メイン画面
