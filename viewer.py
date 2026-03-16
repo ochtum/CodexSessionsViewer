@@ -4041,12 +4041,13 @@ function parseOptionalDatetimeStart(raw){
 function parseOptionalDatetimeEnd(raw){
   if(!raw) return null;
   // raw is expected as YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS from <input type="datetime-local">.
-  // Use end-of-second for inclusive filtering.
   const ts = toTimestamp(raw);
   if(Number.isNaN(ts)) return null;
-  // If only minutes precision, add 59.999 seconds
-  if(raw.length <= 16) return ts + 59999;
-  return ts + 999;
+  // Make end timestamp inclusive: if input has no seconds (no second ':' after T),
+  // add 59.999s to cover the full minute; otherwise add 0.999s for the full second.
+  const timepart = raw.indexOf('T') >= 0 ? raw.slice(raw.indexOf('T') + 1) : '';
+  const hasSeconds = (timepart.match(/:/g) || []).length >= 2;
+  return hasSeconds ? ts + 999 : ts + 59999;
 }
 
 function getActiveSessionId(){
