@@ -167,7 +167,7 @@ def summarize_session(path: Path):
     search_len = 0
     search_limit = SEARCH_TEXT_LIMIT
     summary['relative_path'] = to_relative_path(path)
-    done_collecting = False
+    skip_detail_parsing = False
 
     try:
         with path.open('r', encoding='utf-8') as f:
@@ -178,7 +178,7 @@ def summarize_session(path: Path):
                     if not summary['first_event_at']:
                         summary['first_event_at'] = ts
                     summary['last_event_at'] = ts
-                if done_collecting:
+                if skip_detail_parsing:
                     continue
                 t = obj.get('type')
                 payload = obj.get('payload', {})
@@ -214,7 +214,7 @@ def summarize_session(path: Path):
                             summary['first_real_user_text'] = raw.replace('\n', ' ')[:160]
                 if summary['started_at'] and summary['first_user_text']:
                     if summary['first_real_user_text'] and search_len >= search_limit:
-                        done_collecting = True
+                        skip_detail_parsing = True
     except Exception:
         pass
     if not summary['first_real_user_text']:
@@ -754,7 +754,7 @@ function parseOptionalDateTimeEnd(raw){
   if(!raw) return null;
   const ts = toTimestamp(raw);
   if(Number.isNaN(ts)) return null;
-  // datetime-local gives YYYY-MM-DDTHH:MM; include rest of minute
+  // datetime-local gives YYYY-MM-DDTHH:MM (16 chars); include rest of that minute (+59s 999ms)
   if(raw.length <= 16) return ts + 59999;
   return ts;
 }
