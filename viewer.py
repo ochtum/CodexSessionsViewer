@@ -320,8 +320,7 @@ body {
 header {
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255,255,255,0.9);
-  backdrop-filter: blur(4px);
+  background: #ffffff;
 }
 header h1 { margin: 0; font-size: 18px; }
 header small { color: var(--muted); }
