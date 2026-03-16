@@ -1504,6 +1504,19 @@ header h1 {
   display: grid;
   gap: var(--space-4);
 }
+.field-grid-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.button-row-spaced {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
 .field {
   display: grid;
   gap: var(--space-1);
@@ -2516,6 +2529,10 @@ pre {
               <span>イベント終了日時</span>
               <input id="event_date_to" type="datetime-local" step="1" />
             </label>
+            <div class="button-row">
+              <button id="apply_event_date_filter" class="secondary-action">適用</button>
+              <button id="clear_event_date_filter" class="secondary-action">クリア</button>
+            </div>
             <label class="field">
               <span>source</span>
               <select id="source_filter">
@@ -2600,7 +2617,7 @@ pre {
             <button id="detail_keyword_next" class="secondary-action" title="N" disabled>次へ</button>
             <button id="detail_keyword_clear" class="secondary-action" disabled>検索をクリア</button>
           </div>
-          <div class="field-grid" style="margin-top:8px;">
+          <div class="field-grid-row">
             <label class="field">
               <span>イベント開始日時</span>
               <input id="detail_event_date_from" type="datetime-local" step="1" />
@@ -2609,6 +2626,9 @@ pre {
               <span>イベント終了日時</span>
               <input id="detail_event_date_to" type="datetime-local" step="1" />
             </label>
+          </div>
+          <div class="button-row-spaced">
+            <button id="clear_detail_event_date" class="secondary-action">日時クリア</button>
           </div>
         </section>
         <section id="detail_message_range_row" class="detail-toolbar-row range">
@@ -2799,6 +2819,8 @@ const I18N = {
     'filter.dateTo': '終了日',
     'filter.eventDateFrom': 'イベント開始日時',
     'filter.eventDateTo': 'イベント終了日時',
+    'filter.eventDateApply': '適用',
+    'filter.eventDateClear': 'クリア',
     'filter.source': 'source',
     'filter.sessionLabel': 'セッションラベル',
     'filter.eventLabel': 'イベントラベル',
@@ -2841,6 +2863,7 @@ const I18N = {
     'detail.searchClear': '検索をクリア',
     'detail.eventDateFrom': 'イベント開始日時',
     'detail.eventDateTo': 'イベント終了日時',
+    'detail.eventDateClear': '日時クリア',
     'detail.range': '範囲選択',
     'detail.rangeMode': '起点選択モード',
     'detail.rangeModeEnd': '起点選択終了',
@@ -2945,6 +2968,8 @@ const I18N = {
     'filter.dateTo': 'End date',
     'filter.eventDateFrom': 'Event start date/time',
     'filter.eventDateTo': 'Event end date/time',
+    'filter.eventDateApply': 'Apply',
+    'filter.eventDateClear': 'Clear',
     'filter.source': 'Source',
     'filter.sessionLabel': 'Session label',
     'filter.eventLabel': 'Event label',
@@ -2987,6 +3012,7 @@ const I18N = {
     'detail.searchClear': 'Clear search',
     'detail.eventDateFrom': 'Event start date/time',
     'detail.eventDateTo': 'Event end date/time',
+    'detail.eventDateClear': 'Clear dates',
     'detail.range': 'Range',
     'detail.rangeMode': 'Anchor mode',
     'detail.rangeModeEnd': 'End anchor mode',
@@ -3091,6 +3117,8 @@ const I18N = {
     'filter.dateTo': '结束日期',
     'filter.eventDateFrom': '事件开始日期时间',
     'filter.eventDateTo': '事件结束日期时间',
+    'filter.eventDateApply': '应用',
+    'filter.eventDateClear': '清除',
     'filter.source': '来源',
     'filter.sessionLabel': '会话标签',
     'filter.eventLabel': '事件标签',
@@ -3133,6 +3161,7 @@ const I18N = {
     'detail.searchClear': '清除搜索',
     'detail.eventDateFrom': '事件开始日期时间',
     'detail.eventDateTo': '事件结束日期时间',
+    'detail.eventDateClear': '清除日期',
     'detail.range': '范围',
     'detail.rangeMode': '锚点模式',
     'detail.rangeModeEnd': '结束锚点模式',
@@ -3235,6 +3264,8 @@ I18N['zh-Hant'] = {
   'filter.dateTo': '結束日期',
   'filter.eventDateFrom': '事件開始日期時間',
   'filter.eventDateTo': '事件結束日期時間',
+  'filter.eventDateApply': '套用',
+  'filter.eventDateClear': '清除',
   'filter.source': '來源',
   'filter.eventLabel': '事件標籤',
   'placeholder.cwd': 'cwd（部分比對）',
@@ -3268,6 +3299,7 @@ I18N['zh-Hant'] = {
   'detail.searchClear': '清除搜尋',
   'detail.eventDateFrom': '事件開始日期時間',
   'detail.eventDateTo': '事件結束日期時間',
+  'detail.eventDateClear': '清除日期',
   'detail.range': '範圍',
   'detail.rangeMode': '錨點模式',
   'detail.rangeModeEnd': '結束錨點模式',
@@ -3429,6 +3461,8 @@ function applyMainLanguage(){
   setFieldLabel('date_to', t('filter.dateTo'));
   setFieldLabel('event_date_from', t('filter.eventDateFrom'));
   setFieldLabel('event_date_to', t('filter.eventDateTo'));
+  setTextById('apply_event_date_filter', t('filter.eventDateApply'));
+  setTextById('clear_event_date_filter', t('filter.eventDateClear'));
   setFieldLabel('source_filter', t('filter.source'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
@@ -3463,6 +3497,7 @@ function applyMainLanguage(){
   setTextById('detail_keyword_clear', t('detail.searchClear'));
   setFieldLabel('detail_event_date_from', t('detail.eventDateFrom'));
   setFieldLabel('detail_event_date_to', t('detail.eventDateTo'));
+  setTextById('clear_detail_event_date', t('detail.eventDateClear'));
   setText('.detail-toolbar-row.range .detail-group-title', t('detail.range'));
   setTextById('clear_message_range_selection', t('detail.rangeClear'));
   const shortcutDescriptions = [
@@ -5568,8 +5603,14 @@ function moveDetailKeywordSearchByShortcut(step){
 document.getElementById('cwd_q').addEventListener('input', applyFilter);
 document.getElementById('date_from').addEventListener('change', applyFilter);
 document.getElementById('date_to').addEventListener('change', applyFilter);
-document.getElementById('event_date_from').addEventListener('change', applyFilter);
-document.getElementById('event_date_to').addEventListener('change', applyFilter);
+document.getElementById('event_date_from').addEventListener('change', saveFiltersSoon);
+document.getElementById('event_date_to').addEventListener('change', saveFiltersSoon);
+document.getElementById('apply_event_date_filter').addEventListener('click', applyFilter);
+document.getElementById('clear_event_date_filter').addEventListener('click', () => {
+  document.getElementById('event_date_from').value = '';
+  document.getElementById('event_date_to').value = '';
+  applyFilter();
+});
 document.getElementById('q').addEventListener('input', scheduleLoadSessions);
 document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
@@ -5584,6 +5625,12 @@ document.getElementById('detail_event_date_from').addEventListener('change', () 
   renderActiveSession();
 });
 document.getElementById('detail_event_date_to').addEventListener('change', () => {
+  saveFilters();
+  renderActiveSession();
+});
+document.getElementById('clear_detail_event_date').addEventListener('click', () => {
+  document.getElementById('detail_event_date_from').value = '';
+  document.getElementById('detail_event_date_to').value = '';
   saveFilters();
   renderActiveSession();
 });
