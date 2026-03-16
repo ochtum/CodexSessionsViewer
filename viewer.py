@@ -619,6 +619,23 @@ pre {
   border-radius: 8px;
   padding: 10px 12px;
 }
+.toggle-bar {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #eef3f9;
+  text-align: right;
+}
+.toggle-bar button {
+  font-size: 12px;
+  padding: 3px 10px;
+  background: #5a7a9a;
+}
+.toolbar.collapsed {
+  display: none;
+}
+.detail-toolbar.collapsed {
+  display: none;
+}
 @media (max-width: 900px) {
   .container {
     grid-template-columns: 1fr;
@@ -651,10 +668,12 @@ pre {
       <button id="reload">Reload</button>
       <button id="clear">Clear</button>
     </div>
+    <div class="toggle-bar"><button id="toggle_filter">フィルタを隠す</button></div>
     <div id="sessions"></div>
   </aside>
   <main class="right">
     <div class="meta" id="meta">セッションを選択してください</div>
+    <div class="toggle-bar"><button id="toggle_detail">詳細操作を隠す</button></div>
     <div class="detail-toolbar">
       <label><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
       <label><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
@@ -676,6 +695,59 @@ const state = {
 };
 
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
+const UI_STATE_KEY = 'codex_sessions_viewer_ui_state_v1';
+
+function saveUIState(){
+  const payload = {
+    filterVisible: !document.querySelector('.toolbar').classList.contains('collapsed'),
+    detailVisible: !document.querySelector('.detail-toolbar').classList.contains('collapsed'),
+  };
+  try {
+    localStorage.setItem(UI_STATE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    // Ignore storage write errors.
+  }
+}
+
+function restoreUIState(){
+  let raw = null;
+  try {
+    raw = localStorage.getItem(UI_STATE_KEY);
+  } catch (e) {
+    raw = null;
+  }
+  // On first startup (no saved state), both panes are visible by default.
+  if(!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    if(data.filterVisible === false){
+      document.querySelector('.toolbar').classList.add('collapsed');
+      document.getElementById('toggle_filter').textContent = 'フィルタを表示';
+    }
+    if(data.detailVisible === false){
+      document.querySelector('.detail-toolbar').classList.add('collapsed');
+      document.getElementById('toggle_detail').textContent = '詳細操作を表示';
+    }
+  } catch (e) {
+    // Ignore invalid saved state.
+  }
+}
+
+function toggleFilterPane(){
+  const toolbar = document.querySelector('.toolbar');
+  const btn = document.getElementById('toggle_filter');
+  toolbar.classList.toggle('collapsed');
+  btn.textContent = toolbar.classList.contains('collapsed') ? 'フィルタを表示' : 'フィルタを隠す';
+  saveUIState();
+}
+
+function toggleDetailPane(){
+  const toolbar = document.querySelector('.detail-toolbar');
+  const btn = document.getElementById('toggle_detail');
+  toolbar.classList.toggle('collapsed');
+  btn.textContent = toolbar.classList.contains('collapsed') ? '詳細操作を表示' : '詳細操作を隠す';
+  saveUIState();
+}
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -1004,6 +1076,8 @@ async function refreshActiveSession(){
   await openSession(state.activePath);
 }
 
+document.getElementById('toggle_filter').addEventListener('click', toggleFilterPane);
+document.getElementById('toggle_detail').addEventListener('click', toggleDetailPane);
 document.getElementById('cwd_q').addEventListener('input', applyFilter);
 document.getElementById('date_from').addEventListener('change', applyFilter);
 document.getElementById('date_to').addEventListener('change', applyFilter);
@@ -1019,6 +1093,7 @@ document.getElementById('refresh_detail').addEventListener('click', refreshActiv
 document.getElementById('copy_resume_command').addEventListener('click', copyResumeCommand);
 updateCopyResumeButtonState();
 updateRefreshDetailButtonState();
+restoreUIState();
 restoreFilters();
 loadSessions();
 </script>
