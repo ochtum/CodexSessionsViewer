@@ -337,6 +337,27 @@ header small { color: var(--muted); }
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
+}
+.loading-overlay {
+  display: none;
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(249, 252, 255, 0.7);
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 4px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 .toolbar {
   padding: 10px;
@@ -652,6 +673,7 @@ pre {
       <button id="clear">Clear</button>
     </div>
     <div id="sessions"></div>
+    <div id="loading-overlay" class="loading-overlay"><div class="loading-spinner"></div></div>
   </aside>
   <main class="right">
     <div class="meta" id="meta">セッションを選択してください</div>
@@ -676,6 +698,20 @@ const state = {
 };
 
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
+
+function showLoading(){
+  document.getElementById('loading-overlay').style.display = 'flex';
+}
+function hideLoading(){
+  document.getElementById('loading-overlay').style.display = 'none';
+}
+function applyFilterDeferred(){
+  showLoading();
+  setTimeout(() => {
+    applyFilter();
+    hideLoading();
+  }, 0);
+}
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -784,23 +820,28 @@ async function copyResumeCommand(){
 }
 
 async function loadSessions(){
-  const r = await fetch('/api/sessions?ts=' + Date.now(), { cache: 'no-store' });
-  const data = await r.json();
-  state.sessions = data.sessions;
-  document.getElementById('root').textContent = data.root;
-  applyFilter();
-  if(state.activePath){
-    const exists = state.sessions.some(s => s.path === state.activePath);
-    if(exists){
-      await openSession(state.activePath);
-    } else {
-      state.activePath = null;
-      state.activeSession = null;
-      state.activeEvents = [];
-      state.activeRawLineCount = 0;
-      renderSessionList();
-      renderActiveSession();
+  showLoading();
+  try {
+    const r = await fetch('/api/sessions?ts=' + Date.now(), { cache: 'no-store' });
+    const data = await r.json();
+    state.sessions = data.sessions;
+    document.getElementById('root').textContent = data.root;
+    applyFilter();
+    if(state.activePath){
+      const exists = state.sessions.some(s => s.path === state.activePath);
+      if(exists){
+        await openSession(state.activePath);
+      } else {
+        state.activePath = null;
+        state.activeSession = null;
+        state.activeEvents = [];
+        state.activeRawLineCount = 0;
+        renderSessionList();
+        renderActiveSession();
+      }
     }
+  } finally {
+    hideLoading();
   }
 }
 
@@ -854,7 +895,7 @@ function clearFilters(){
   } catch (e) {
     // Ignore storage delete errors.
   }
-  applyFilter();
+  applyFilterDeferred();
 }
 
 function applyFilter(){
@@ -1004,12 +1045,12 @@ async function refreshActiveSession(){
   await openSession(state.activePath);
 }
 
-document.getElementById('cwd_q').addEventListener('input', applyFilter);
-document.getElementById('date_from').addEventListener('change', applyFilter);
-document.getElementById('date_to').addEventListener('change', applyFilter);
-document.getElementById('q').addEventListener('input', applyFilter);
-document.getElementById('mode').addEventListener('change', applyFilter);
-document.getElementById('source_filter').addEventListener('change', applyFilter);
+document.getElementById('cwd_q').addEventListener('input', applyFilterDeferred);
+document.getElementById('date_from').addEventListener('change', applyFilterDeferred);
+document.getElementById('date_to').addEventListener('change', applyFilterDeferred);
+document.getElementById('q').addEventListener('input', applyFilterDeferred);
+document.getElementById('mode').addEventListener('change', applyFilterDeferred);
+document.getElementById('source_filter').addEventListener('change', applyFilterDeferred);
 document.getElementById('reload').addEventListener('click', loadSessions);
 document.getElementById('clear').addEventListener('click', clearFilters);
 document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
