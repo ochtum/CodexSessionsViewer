@@ -371,7 +371,8 @@ button {
   cursor: pointer;
 }
 .session-item:hover { background: #eef7ff; }
-.session-item.active { background: #dff0ff; }
+.session-item.active { background: #dbeafe; border-left: 3px solid #2563eb; padding-left: 9px; }
+.session-item.active:hover { background: #d0e0f7; }
 .session-path {
   font-size: 12px;
   color: var(--muted);
