@@ -1687,6 +1687,37 @@ button:disabled {
   margin: 0;
   accent-color: var(--accent);
 }
+.sort-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+}
+.sort-tab {
+  flex: 1;
+  padding: 7px 4px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sort-tab:hover {
+  color: var(--text);
+  background: rgba(15, 118, 110, 0.04);
+}
+.sort-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(15, 118, 110, 0.06);
+}
 #sessions {
   height: 100%;
   overflow-x: hidden;
@@ -2513,17 +2544,14 @@ pre {
                 <option value="">event label: all</option>
               </select>
             </label>
-            <label class="field">
-              <span>並び順</span>
-              <select id="sort_order">
-                <option value="desc">新しい順</option>
-                <option value="asc">古い順</option>
-                <option value="updated">最終更新日時順</option>
-              </select>
-            </label>
           </div>
         </section>
       </div>
+    </div>
+    <div class="sort-tabs" role="tablist">
+      <button class="sort-tab active" data-sort="desc" role="tab" aria-selected="true">新しい順</button>
+      <button class="sort-tab" data-sort="asc" role="tab" aria-selected="false">古い順</button>
+      <button class="sort-tab" data-sort="updated" role="tab" aria-selected="false">最終更新日時順</button>
     </div>
     <div class="content-shell">
       <div id="sessions"></div>
@@ -3405,7 +3433,10 @@ function applyMainLanguage(){
   setFieldLabel('source_filter', t('filter.source'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
-  setFieldLabel('sort_order', t('filter.sort'));
+  document.querySelectorAll('.sort-tab').forEach(tab => {
+    const key = 'filter.sort.' + tab.dataset.sort;
+    tab.textContent = t(key);
+  });
   document.getElementById('cwd_q').placeholder = t('placeholder.cwd');
   document.getElementById('q').placeholder = t('placeholder.keyword');
   document.getElementById('detail_keyword_q').placeholder = t('placeholder.detailKeyword');
@@ -3414,9 +3445,6 @@ function applyMainLanguage(){
   setOptionText('source_filter', 0, t('filter.source.all'));
   setOptionText('source_filter', 1, t('filter.source.cli'));
   setOptionText('source_filter', 2, t('filter.source.vscode'));
-  setOptionText('sort_order', 0, t('filter.sort.desc'));
-  setOptionText('sort_order', 1, t('filter.sort.asc'));
-  setOptionText('sort_order', 2, t('filter.sort.updated'));
   setText('.detail-toolbar-row.primary .detail-group-title', t('detail.display'));
   setToggleLabel('only_user_instruction', t('detail.toggle.user'));
   setToggleLabel('only_ai_response', t('detail.toggle.ai'));
@@ -4562,6 +4590,19 @@ function normalizeRequestError(error, fallback){
   return fallback;
 }
 
+function getActiveSortOrder(){
+  const active = document.querySelector('.sort-tab.active');
+  return active ? active.dataset.sort : 'desc';
+}
+
+function setActiveSortOrder(value){
+  document.querySelectorAll('.sort-tab').forEach(tab => {
+    const isActive = tab.dataset.sort === value;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+}
+
 async function loadSessions(options){
   saveFilters();
   const requestId = ++loadSessionsRequestSeq;
@@ -4585,7 +4626,7 @@ async function loadSessions(options){
   if(eventLabelId){
     params.set('event_label_id', eventLabelId);
   }
-  const sortOrder = document.getElementById('sort_order').value;
+  const sortOrder = getActiveSortOrder();
   if(sortOrder && sortOrder !== 'desc'){
     params.set('sort', sortOrder);
   }
@@ -4657,7 +4698,7 @@ function saveFilters(){
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
-    sort_order: document.getElementById('sort_order').value,
+    sort_order: getActiveSortOrder(),
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
     detail_event_label_filter: getSelectedDetailEventLabelFilter(),
@@ -4689,7 +4730,7 @@ function restoreFilters(){
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
     document.getElementById('source_filter').value = source;
-    if(data.sort_order === 'asc' || data.sort_order === 'desc' || data.sort_order === 'updated') document.getElementById('sort_order').value = data.sort_order;
+    if(data.sort_order === 'asc' || data.sort_order === 'desc' || data.sort_order === 'updated') setActiveSortOrder(data.sort_order);
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
@@ -4709,7 +4750,7 @@ function clearFilters(){
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
-  document.getElementById('sort_order').value = 'desc';
+  setActiveSortOrder('desc');
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
   document.getElementById('detail_event_label_filter').value = '';
@@ -5483,7 +5524,12 @@ document.getElementById('date_to').addEventListener('change', applyFilter);
 document.getElementById('q').addEventListener('input', scheduleLoadSessions);
 document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
-document.getElementById('sort_order').addEventListener('change', scheduleLoadSessions);
+document.querySelectorAll('.sort-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    setActiveSortOrder(tab.dataset.sort);
+    scheduleLoadSessions();
+  });
+});
 document.getElementById('session_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('detail_event_label_filter').addEventListener('change', () => {
