@@ -19,7 +19,7 @@ MAX_EVENTS = 2000
 SEARCH_TEXT_LIMIT = 50000
 SUMMARY_SCAN_LINE_LIMIT = 400
 SEARCH_INDEX_TEXT_LIMIT = SEARCH_TEXT_LIMIT
-SEARCH_INDEX_SCHEMA_VERSION = 3
+SEARCH_INDEX_SCHEMA_VERSION = 4
 SEARCH_INDEX_DB_PATH = Path(__file__).resolve().parent / '.cache' / 'search_index.sqlite3'
 ICON_DIR = Path(__file__).resolve().parent / 'icons'
 _CACHED_SESSIONS_DIR = None
@@ -347,6 +347,9 @@ def open_search_index_connection():
             conn.execute('DROP TABLE IF EXISTS session_index')
             conn.execute('DROP TABLE IF EXISTS session_label_links')
             conn.execute('DROP TABLE IF EXISTS event_label_links')
+    if current_version >= 3 and current_version < 4:
+        with conn:
+            conn.execute('DROP TABLE IF EXISTS session_index')
     conn.execute(
         '''
         CREATE TABLE IF NOT EXISTS session_index (
@@ -363,7 +366,9 @@ def open_search_index_connection():
             source TEXT NOT NULL,
             first_user_text TEXT NOT NULL,
             first_real_user_text TEXT NOT NULL,
-            search_text TEXT NOT NULL
+            search_text TEXT NOT NULL,
+            min_event_ts TEXT NOT NULL DEFAULT '',
+            max_event_ts TEXT NOT NULL DEFAULT ''
         )
         '''
     )
@@ -437,6 +442,8 @@ def summary_from_index_row(row):
         'source': row['source'],
         'first_user_text': row['first_user_text'],
         'first_real_user_text': row['first_real_user_text'],
+        'min_event_ts': row['min_event_ts'],
+        'max_event_ts': row['max_event_ts'],
     }
 
 
@@ -455,6 +462,8 @@ def build_search_index_record(path: Path, stat_result=None):
         'source': 'cli',
         'first_user_text': '',
         'first_real_user_text': '',
+        'min_event_ts': '',
+        'max_event_ts': '',
     }
     search_chunks = []
     search_len = 0
@@ -465,6 +474,12 @@ def build_search_index_record(path: Path, stat_result=None):
                 obj = json.loads(line)
                 t = obj.get('type')
                 payload = obj.get('payload', {})
+                line_ts = obj.get('timestamp', '')
+                if line_ts:
+                    if not summary['min_event_ts'] or line_ts < summary['min_event_ts']:
+                        summary['min_event_ts'] = line_ts
+                    if not summary['max_event_ts'] or line_ts > summary['max_event_ts']:
+                        summary['max_event_ts'] = line_ts
                 if t == 'session_meta':
                     summary['session_id'] = payload.get('id', '')
                     summary['started_at'] = payload.get('timestamp', '')
@@ -517,14 +532,6 @@ def build_search_index_record(path: Path, stat_result=None):
                         SEARCH_INDEX_TEXT_LIMIT,
                     )
 
-                if (
-                    SEARCH_INDEX_TEXT_LIMIT > 0
-                    and search_len >= SEARCH_INDEX_TEXT_LIMIT
-                    and summary['started_at']
-                    and summary['first_user_text']
-                    and summary['first_real_user_text']
-                ):
-                    break
     except Exception:
         pass
 
@@ -601,8 +608,9 @@ def sync_search_index(paths, prune_missing=True):
                         INSERT INTO session_index (
                             path, id, relative_path, mtime_iso, mtime_ns, size,
                             session_id, started_at, cwd, model, source,
-                            first_user_text, first_real_user_text, search_text
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            first_user_text, first_real_user_text, search_text,
+                            min_event_ts, max_event_ts
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(path) DO UPDATE SET
                             id = excluded.id,
                             relative_path = excluded.relative_path,
@@ -616,7 +624,9 @@ def sync_search_index(paths, prune_missing=True):
                             source = excluded.source,
                             first_user_text = excluded.first_user_text,
                             first_real_user_text = excluded.first_real_user_text,
-                            search_text = excluded.search_text
+                            search_text = excluded.search_text,
+                            min_event_ts = excluded.min_event_ts,
+                            max_event_ts = excluded.max_event_ts
                         ''',
                         (
                             summary['path'],
@@ -633,6 +643,8 @@ def sync_search_index(paths, prune_missing=True):
                             summary['first_user_text'],
                             summary['first_real_user_text'],
                             search_text,
+                            summary.get('min_event_ts', ''),
+                            summary.get('max_event_ts', ''),
                         ),
                     )
         finally:
@@ -655,7 +667,8 @@ def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_
         try:
             columns = (
                 'id, path, relative_path, mtime_iso, session_id, started_at, '
-                'cwd, model, source, first_user_text, first_real_user_text'
+                'cwd, model, source, first_user_text, first_real_user_text, '
+                'min_event_ts, max_event_ts'
             )
             where_clauses = []
             params = []
