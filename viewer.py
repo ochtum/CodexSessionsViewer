@@ -4757,7 +4757,7 @@ function renderSessionList(){
       </div>
     `).join('');
   }
-  if(state.isSessionsLoading && state.hasLoadedSessions && state.sessionsLoadMode === 'reload'){
+  if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
     setStatusLayer(
       'sessions_status',
       t('status.sessions.refreshTitle'),
