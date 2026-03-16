@@ -1402,6 +1402,28 @@ header h1 {
   min-height: 0;
   overflow: auto;
 }
+.session-count {
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  background: rgba(246, 250, 255, 0.6);
+}
+.session-count:empty {
+  display: none;
+}
+.match-counter {
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+.match-counter.hidden {
+  display: none;
+}
 .toolbar-topline,
 .detail-toolbar-topline {
   display: flex;
@@ -2510,6 +2532,7 @@ pre {
         </section>
       </div>
     </div>
+    <div id="session_count" class="session-count" aria-live="polite"></div>
     <div class="content-shell">
       <div id="sessions"></div>
       <div id="sessions_status" class="status-layer hidden" aria-live="polite"></div>
@@ -2568,6 +2591,7 @@ pre {
             <button id="detail_keyword_search" disabled>検索</button>
             <button id="detail_keyword_prev" class="secondary-action" title="P" disabled>前へ</button>
             <button id="detail_keyword_next" class="secondary-action" title="N" disabled>次へ</button>
+            <span id="detail_keyword_match_count" class="match-counter hidden"></span>
             <button id="detail_keyword_clear" class="secondary-action" disabled>検索をクリア</button>
           </div>
         </section>
@@ -2839,9 +2863,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(previewなし)',
     'status.sessions.loadingTitle': 'セッション一覧を読み込み中...',
     'status.sessions.loadingCopy': '最新のセッションを確認しています。',
@@ -2981,9 +3007,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(no preview)',
     'status.sessions.loadingTitle': 'Loading sessions...',
     'status.sessions.loadingCopy': 'Checking the latest sessions.',
@@ -3123,9 +3151,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(无预览)',
     'status.sessions.loadingTitle': '正在加载会话列表...',
     'status.sessions.loadingCopy': '正在检查最新会话。',
@@ -4164,6 +4194,17 @@ function updateDetailKeywordControls(searchMeta){
   clearButton.disabled = !hasKeywordState;
   filterButton.classList.toggle('active', hasActiveSession && detailKeywordFilterTerm !== '');
   searchButton.classList.toggle('active', hasActiveSession && detailKeywordSearchTerm !== '');
+  const matchCountEl = document.getElementById('detail_keyword_match_count');
+  if(matchCountEl){
+    if(hasSearchMatches){
+      const current = detailKeywordCurrentMatchIndex >= 0 ? detailKeywordCurrentMatchIndex + 1 : 0;
+      matchCountEl.textContent = t('detail.matchCounter', { current: current, total: searchTotal });
+      matchCountEl.classList.remove('hidden');
+    } else {
+      matchCountEl.textContent = '';
+      matchCountEl.classList.add('hidden');
+    }
+  }
   updateClearDetailButtonState();
 }
 
@@ -4770,6 +4811,14 @@ function renderSessionList(){
   box.querySelectorAll('.session-item').forEach(el => {
     el.onclick = () => openSession(el.dataset.path);
   });
+  const countEl = document.getElementById('session_count');
+  if(countEl){
+    if(state.hasLoadedSessions && state.sessions.length > 0){
+      countEl.textContent = t('summary.sessions', { filtered: state.filtered.length, total: state.sessions.length });
+    } else {
+      countEl.textContent = '';
+    }
+  }
 }
 
 function getDisplayEvents(){
