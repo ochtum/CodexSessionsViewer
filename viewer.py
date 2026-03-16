@@ -5514,6 +5514,7 @@ document.getElementById('language_select').addEventListener('change', (event) =>
 document.getElementById('detail_keyword_q').addEventListener('keydown', (event) => {
   if(event.key === 'Enter' && !event.isComposing){
     event.preventDefault();
+    detailKeywordFilterTerm = getDetailKeywordInputValue();
     runDetailKeywordSearch();
     releaseSearchFocus();
   }
