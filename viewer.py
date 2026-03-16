@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import shlex
 import sqlite3
 import threading
 import urllib.parse
@@ -214,6 +215,19 @@ def normalize_search_text(text: str) -> str:
     if not text:
         return ''
     return re.sub(r'\s+', ' ', text).strip().lower()
+
+
+def parse_search_query(query: str) -> list[str]:
+    """Split search query into terms, respecting double-quoted phrases.
+
+    `"Working Space"` is kept as a single term while unquoted words
+    are split on whitespace.  Falls back to simple `str.split()`
+    when quotes are unbalanced.
+    """
+    try:
+        return shlex.split(query)
+    except ValueError:
+        return query.split()
 
 
 def is_safe_css_color(value: str) -> bool:
@@ -646,7 +660,7 @@ def sync_search_index(paths, prune_missing=True):
 
 def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_label_id=None, event_label_id=None, sort='desc'):
     normalized_terms = []
-    for term in query.split():
+    for term in parse_search_query(query):
         normalized = normalize_search_text(term)
         if normalized:
             normalized_terms.append(normalized)
