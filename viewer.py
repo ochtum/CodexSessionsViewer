@@ -1509,6 +1509,7 @@ header h1 {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 8px;
+  grid-column: 1 / -1;
 }
 .button-row-spaced {
   display: flex;
@@ -1516,6 +1517,7 @@ header h1 {
   gap: var(--space-2);
   flex-wrap: wrap;
   margin-top: 4px;
+  grid-column: 1 / -1;
 }
 .field {
   display: grid;
@@ -2529,10 +2531,6 @@ pre {
               <span>イベント終了日時</span>
               <input id="event_date_to" type="datetime-local" step="1" />
             </label>
-            <div class="button-row">
-              <button id="apply_event_date_filter" class="secondary-action">適用</button>
-              <button id="clear_event_date_filter" class="secondary-action">クリア</button>
-            </div>
             <label class="field">
               <span>source</span>
               <select id="source_filter">
@@ -2553,6 +2551,9 @@ pre {
                 <option value="">event label: all</option>
               </select>
             </label>
+          </div>
+          <div class="button-row">
+            <button id="apply_event_date_filter" class="secondary-action">適用</button>
           </div>
         </section>
       </div>
@@ -2820,7 +2821,6 @@ const I18N = {
     'filter.eventDateFrom': 'イベント開始日時',
     'filter.eventDateTo': 'イベント終了日時',
     'filter.eventDateApply': '適用',
-    'filter.eventDateClear': 'クリア',
     'filter.source': 'source',
     'filter.sessionLabel': 'セッションラベル',
     'filter.eventLabel': 'イベントラベル',
@@ -2969,7 +2969,6 @@ const I18N = {
     'filter.eventDateFrom': 'Event start date/time',
     'filter.eventDateTo': 'Event end date/time',
     'filter.eventDateApply': 'Apply',
-    'filter.eventDateClear': 'Clear',
     'filter.source': 'Source',
     'filter.sessionLabel': 'Session label',
     'filter.eventLabel': 'Event label',
@@ -3118,7 +3117,6 @@ const I18N = {
     'filter.eventDateFrom': '事件开始日期时间',
     'filter.eventDateTo': '事件结束日期时间',
     'filter.eventDateApply': '应用',
-    'filter.eventDateClear': '清除',
     'filter.source': '来源',
     'filter.sessionLabel': '会话标签',
     'filter.eventLabel': '事件标签',
@@ -3265,7 +3263,6 @@ I18N['zh-Hant'] = {
   'filter.eventDateFrom': '事件開始日期時間',
   'filter.eventDateTo': '事件結束日期時間',
   'filter.eventDateApply': '套用',
-  'filter.eventDateClear': '清除',
   'filter.source': '來源',
   'filter.eventLabel': '事件標籤',
   'placeholder.cwd': 'cwd（部分比對）',
@@ -3462,7 +3459,6 @@ function applyMainLanguage(){
   setFieldLabel('event_date_from', t('filter.eventDateFrom'));
   setFieldLabel('event_date_to', t('filter.eventDateTo'));
   setTextById('apply_event_date_filter', t('filter.eventDateApply'));
-  setTextById('clear_event_date_filter', t('filter.eventDateClear'));
   setFieldLabel('source_filter', t('filter.source'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
@@ -5606,11 +5602,6 @@ document.getElementById('date_to').addEventListener('change', applyFilter);
 document.getElementById('event_date_from').addEventListener('change', saveFiltersSoon);
 document.getElementById('event_date_to').addEventListener('change', saveFiltersSoon);
 document.getElementById('apply_event_date_filter').addEventListener('click', applyFilter);
-document.getElementById('clear_event_date_filter').addEventListener('click', () => {
-  document.getElementById('event_date_from').value = '';
-  document.getElementById('event_date_to').value = '';
-  applyFilter();
-});
 document.getElementById('q').addEventListener('input', scheduleLoadSessions);
 document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
