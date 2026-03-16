@@ -857,6 +857,17 @@ function clearFilters(){
   applyFilter();
 }
 
+function parseSearchTerms(input){
+  const terms = [];
+  const re = /"([^"]*)"|(\\S+)/g;
+  let m;
+  while((m = re.exec(input)) !== null){
+    const t = m[1] !== undefined ? m[1] : m[2];
+    if(t) terms.push(t);
+  }
+  return terms;
+}
+
 function applyFilter(){
   const cwdQ = document.getElementById('cwd_q').value.toLowerCase().trim();
   const q = document.getElementById('q').value.toLowerCase().trim();
@@ -866,7 +877,7 @@ function applyFilter(){
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
   const mode = document.getElementById('mode').value;
-  const terms = q.split(/\\s+/).filter(Boolean);
+  const terms = parseSearchTerms(q);
   state.filtered = state.sessions.filter(s => {
     const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
     const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
