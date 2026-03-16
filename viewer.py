@@ -353,6 +353,11 @@ input, select, button {
   font-size: 13px;
 }
 #cwd_q, #q { flex: 1 1 220px; }
+.result-count {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
 #date_from, #date_to { flex: 1 1 185px; }
 #mode { flex: 0 0 auto; }
 button {
@@ -650,6 +655,7 @@ pre {
       </select>
       <button id="reload">Reload</button>
       <button id="clear">Clear</button>
+      <span id="result_count" class="result-count"></span>
     </div>
     <div id="sessions"></div>
   </aside>
@@ -908,6 +914,10 @@ function applyFilter(){
 }
 
 function renderSessionList(){
+  const countEl = document.getElementById('result_count');
+  const total = state.sessions.length;
+  const shown = state.filtered.length;
+  countEl.textContent = shown === total ? `${total} sessions` : `${shown} / ${total} sessions`;
   const box = document.getElementById('sessions');
   box.innerHTML = state.filtered.map(s => `
     <div class="session-item ${state.activePath === s.path ? 'active' : ''}" data-path="${esc(s.path)}">
