@@ -2879,6 +2879,7 @@ const I18N = {
     'detail.search': '検索',
     'detail.searchKeyword': '詳細キーワード',
     'detail.searchFilter': 'フィルター',
+    'detail.searchFilterClear': 'フィルター解除',
     'detail.searchRun': '検索',
     'detail.prev': '前へ',
     'detail.next': '次へ',
@@ -3027,6 +3028,7 @@ const I18N = {
     'detail.search': 'Search',
     'detail.searchKeyword': 'Detail keyword',
     'detail.searchFilter': 'Filter',
+    'detail.searchFilterClear': 'Clear Filter',
     'detail.searchRun': 'Search',
     'detail.prev': 'Prev',
     'detail.next': 'Next',
@@ -3175,6 +3177,7 @@ const I18N = {
     'detail.search': '搜索',
     'detail.searchKeyword': '详细关键词',
     'detail.searchFilter': '筛选',
+    'detail.searchFilterClear': '清除筛选',
     'detail.searchRun': '搜索',
     'detail.prev': '上一项',
     'detail.next': '下一项',
@@ -3313,6 +3316,7 @@ I18N['zh-Hant'] = {
   'detail.searchKeyword': '詳細關鍵字',
   'detail.searchRun': '搜尋',
   'detail.searchFilter': '篩選',
+  'detail.searchFilterClear': '清除篩選',
   'detail.prev': '上一項',
   'detail.next': '下一項',
   'detail.searchClear': '清除搜尋',
@@ -4265,12 +4269,14 @@ function updateDetailKeywordControls(searchMeta){
   const hasSearchMatches = searchTotal > 0;
   const hasKeywordState = hasInputValue || detailKeywordFilterTerm !== '' || detailKeywordSearchTerm !== '';
   input.disabled = !hasActiveSession;
-  filterButton.disabled = !hasActiveSession || !hasInputValue;
+  const hasActiveFilter = detailKeywordFilterTerm !== '';
+  filterButton.disabled = !hasActiveSession || (!hasInputValue && !hasActiveFilter);
   searchButton.disabled = !hasActiveSession || !hasInputValue;
   prevButton.disabled = !hasSearchMatches;
   nextButton.disabled = !hasSearchMatches;
   clearButton.disabled = !hasKeywordState;
-  filterButton.classList.toggle('active', hasActiveSession && detailKeywordFilterTerm !== '');
+  filterButton.classList.toggle('active', hasActiveSession && hasActiveFilter);
+  filterButton.textContent = hasActiveFilter ? t('detail.searchFilterClear') : t('detail.searchFilter');
   searchButton.classList.toggle('active', hasActiveSession && detailKeywordSearchTerm !== '');
   const matchCountEl = document.getElementById('detail_keyword_match_count');
   if(matchCountEl){
@@ -5146,7 +5152,11 @@ function clearDetailMessageRangeSelection(){
 
 function applyDetailKeywordFilter(){
   noteDetailInteraction();
-  detailKeywordFilterTerm = getDetailKeywordInputValue();
+  if(detailKeywordFilterTerm !== ''){
+    detailKeywordFilterTerm = '';
+  } else {
+    detailKeywordFilterTerm = getDetailKeywordInputValue();
+  }
   const eventsBox = document.getElementById('events');
   if(eventsBox){
     eventsBox.scrollTop = 0;
@@ -5657,6 +5667,7 @@ document.getElementById('language_select').addEventListener('change', (event) =>
 document.getElementById('detail_keyword_q').addEventListener('keydown', (event) => {
   if(event.key === 'Enter' && !event.isComposing){
     event.preventDefault();
+    detailKeywordFilterTerm = getDetailKeywordInputValue();
     runDetailKeywordSearch();
     releaseSearchFocus();
   }
