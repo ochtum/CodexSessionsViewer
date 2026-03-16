@@ -2518,7 +2518,7 @@ pre {
           <div class="toolbar-copy">候補を探してから一覧を見る、という流れに整理しました。</div>
         </div>
         <div class="toolbar-utility">
-          <button id="reload" class="primary-action">Reload</button>
+          <button id="reload" class="primary-action" title="F5">Reload</button>
           <button id="clear" class="secondary-action" title="Shift + L">Clear</button>
           <button id="toggle_filters" class="utility-action" title="Shift + F">フィルタを隠す</button>
         </div>
@@ -2607,7 +2607,7 @@ pre {
           <div class="toggle-list">
             <label class="toggle-chip" title="1"><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
             <label class="toggle-chip" title="2"><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
-            <label class="toggle-chip" title="3: 各ターンの user 入力と、その直後の最後の assistant 応答だけを表示"><input type="checkbox" id="turn_boundary_only" /> 各入力と最終応答のみ</label>
+            <label class="toggle-chip" title="3"><input type="checkbox" id="turn_boundary_only" /> 各入力と最終応答のみ</label>
             <label class="toggle-chip" title="4"><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
           </div>
           <label class="field inline-field">
@@ -3498,7 +3498,7 @@ function applyMainLanguage(){
   setToggleLabel('only_user_instruction', t('detail.toggle.user'));
   setToggleLabel('only_ai_response', t('detail.toggle.ai'));
   setToggleLabel('turn_boundary_only', t('detail.toggle.turn'));
-  document.getElementById('turn_boundary_only').closest('label').setAttribute('title', t('detail.toggle.turn'));
+  document.getElementById('turn_boundary_only').closest('label').setAttribute('title', '3');
   setToggleLabel('reverse_order', t('detail.toggle.reverse'));
   setFieldLabel('detail_event_label_filter', t('detail.label'));
   document.getElementById('detail_event_label_filter').setAttribute('title', t('detail.label'));
