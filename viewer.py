@@ -160,16 +160,26 @@ def summarize_session(path: Path):
         'first_user_text': '',
         'first_real_user_text': '',
         'search_text': '',
+        'first_event_at': '',
+        'last_event_at': '',
     }
     search_chunks = []
     search_len = 0
     search_limit = SEARCH_TEXT_LIMIT
     summary['relative_path'] = to_relative_path(path)
+    done_collecting = False
 
     try:
         with path.open('r', encoding='utf-8') as f:
             for line in f:
                 obj = json.loads(line)
+                ts = obj.get('timestamp', '')
+                if ts:
+                    if not summary['first_event_at']:
+                        summary['first_event_at'] = ts
+                    summary['last_event_at'] = ts
+                if done_collecting:
+                    continue
                 t = obj.get('type')
                 payload = obj.get('payload', {})
                 if t == 'session_meta':
@@ -204,7 +214,7 @@ def summarize_session(path: Path):
                             summary['first_real_user_text'] = raw.replace('\n', ' ')[:160]
                 if summary['started_at'] and summary['first_user_text']:
                     if summary['first_real_user_text'] and search_len >= search_limit:
-                        break
+                        done_collecting = True
     except Exception:
         pass
     if not summary['first_real_user_text']:
@@ -354,6 +364,8 @@ input, select, button {
 }
 #cwd_q, #q { flex: 1 1 220px; }
 #date_from, #date_to { flex: 1 1 185px; }
+#event_date_from, #event_date_to { flex: 1 1 185px; }
+#event_date_from_detail, #event_date_to_detail { flex: 0 1 185px; }
 #mode { flex: 0 0 auto; }
 button {
   background: var(--accent);
@@ -636,8 +648,10 @@ pre {
   <aside class="left">
     <div class="toolbar">
       <input id="cwd_q" placeholder="cwd (部分一致)" />
-      <input id="date_from" type="date" />
-      <input id="date_to" type="date" />
+      <input id="date_from" type="date" title="セッション開始日 From" />
+      <input id="date_to" type="date" title="セッション開始日 To" />
+      <input id="event_date_from" type="datetime-local" title="イベント日時 From" placeholder="イベント日時 From" />
+      <input id="event_date_to" type="datetime-local" title="イベント日時 To" placeholder="イベント日時 To" />
       <input id="q" placeholder="keyword filter" />
       <select id="mode">
         <option value="and">keyword AND</option>
@@ -659,6 +673,8 @@ pre {
       <label><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
       <label><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
       <label><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
+      <input id="event_date_from_detail" type="datetime-local" title="イベント日時 From" />
+      <input id="event_date_to_detail" type="datetime-local" title="イベント日時 To" />
       <button id="refresh_detail" disabled>Refresh</button>
       <button id="copy_resume_command" disabled>セッション再開コマンドコピー</button>
     </div>
@@ -726,6 +742,21 @@ function parseOptionalDateEnd(raw){
   // Inclusive end-of-day for date-range filtering.
   const ts = toTimestamp(`${raw}T23:59:59.999`);
   return Number.isNaN(ts) ? null : ts;
+}
+
+function parseOptionalDateTimeStart(raw){
+  if(!raw) return null;
+  const ts = toTimestamp(raw);
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function parseOptionalDateTimeEnd(raw){
+  if(!raw) return null;
+  const ts = toTimestamp(raw);
+  if(Number.isNaN(ts)) return null;
+  // datetime-local gives YYYY-MM-DDTHH:MM; include rest of minute
+  if(raw.length <= 16) return ts + 59999;
+  return ts;
 }
 
 function getActiveSessionId(){
@@ -809,6 +840,8 @@ function saveFilters(){
     cwd_q: document.getElementById('cwd_q').value,
     date_from: document.getElementById('date_from').value,
     date_to: document.getElementById('date_to').value,
+    event_date_from: document.getElementById('event_date_from').value,
+    event_date_to: document.getElementById('event_date_to').value,
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
@@ -833,6 +866,8 @@ function restoreFilters(){
     if(typeof data.cwd_q === 'string') document.getElementById('cwd_q').value = data.cwd_q;
     if(typeof data.date_from === 'string') document.getElementById('date_from').value = data.date_from;
     if(typeof data.date_to === 'string') document.getElementById('date_to').value = data.date_to;
+    if(typeof data.event_date_from === 'string') document.getElementById('event_date_from').value = data.event_date_from;
+    if(typeof data.event_date_to === 'string') document.getElementById('event_date_to').value = data.event_date_to;
     if(typeof data.q === 'string') document.getElementById('q').value = data.q;
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
@@ -846,6 +881,8 @@ function clearFilters(){
   document.getElementById('cwd_q').value = '';
   document.getElementById('date_from').value = '';
   document.getElementById('date_to').value = '';
+  document.getElementById('event_date_from').value = '';
+  document.getElementById('event_date_to').value = '';
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
@@ -865,6 +902,10 @@ function applyFilter(){
   const toRaw = document.getElementById('date_to').value;
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
+  const eventFromRaw = document.getElementById('event_date_from').value;
+  const eventToRaw = document.getElementById('event_date_to').value;
+  const eventFromTs = parseOptionalDateTimeStart(eventFromRaw);
+  const eventToTs = parseOptionalDateTimeEnd(eventToRaw);
   const mode = document.getElementById('mode').value;
   const terms = q.split(/\\s+/).filter(Boolean);
   state.filtered = state.sessions.filter(s => {
@@ -886,6 +927,22 @@ function applyFilter(){
       }
     }
 
+    let eventDateMatched = true;
+    if(eventFromTs !== null || eventToTs !== null){
+      const firstTs = toTimestamp(s.first_event_at);
+      const lastTs = toTimestamp(s.last_event_at);
+      if(Number.isNaN(firstTs) || Number.isNaN(lastTs)){
+        eventDateMatched = false;
+      } else {
+        if(eventFromTs !== null && lastTs < eventFromTs){
+          eventDateMatched = false;
+        }
+        if(eventToTs !== null && firstTs > eventToTs){
+          eventDateMatched = false;
+        }
+      }
+    }
+
     let keywordMatched = true;
     if(terms.length > 0){
       const target = (
@@ -901,7 +958,7 @@ function applyFilter(){
       }
     }
 
-    return cwdMatched && sourceMatched && dateMatched && keywordMatched;
+    return cwdMatched && sourceMatched && dateMatched && eventDateMatched && keywordMatched;
   });
   saveFilters();
   renderSessionList();
@@ -936,6 +993,19 @@ function getDisplayEvents(){
     events = events.filter(ev => {
       if(ev.kind !== 'message') return false;
       return (showOnlyUser && ev.role === 'user') || (showOnlyAssistant && ev.role === 'assistant');
+    });
+  }
+  const eventFromRaw = document.getElementById('event_date_from_detail').value;
+  const eventToRaw = document.getElementById('event_date_to_detail').value;
+  const eventFromTs = parseOptionalDateTimeStart(eventFromRaw);
+  const eventToTs = parseOptionalDateTimeEnd(eventToRaw);
+  if(eventFromTs !== null || eventToTs !== null){
+    events = events.filter(ev => {
+      const evTs = toTimestamp(ev.timestamp);
+      if(Number.isNaN(evTs)) return false;
+      if(eventFromTs !== null && evTs < eventFromTs) return false;
+      if(eventToTs !== null && evTs > eventToTs) return false;
+      return true;
     });
   }
   if(document.getElementById('reverse_order').checked){
@@ -1007,6 +1077,8 @@ async function refreshActiveSession(){
 document.getElementById('cwd_q').addEventListener('input', applyFilter);
 document.getElementById('date_from').addEventListener('change', applyFilter);
 document.getElementById('date_to').addEventListener('change', applyFilter);
+document.getElementById('event_date_from').addEventListener('change', applyFilter);
+document.getElementById('event_date_to').addEventListener('change', applyFilter);
 document.getElementById('q').addEventListener('input', applyFilter);
 document.getElementById('mode').addEventListener('change', applyFilter);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
@@ -1015,6 +1087,8 @@ document.getElementById('clear').addEventListener('click', clearFilters);
 document.getElementById('only_user_instruction').addEventListener('change', renderActiveSession);
 document.getElementById('only_ai_response').addEventListener('change', renderActiveSession);
 document.getElementById('reverse_order').addEventListener('change', renderActiveSession);
+document.getElementById('event_date_from_detail').addEventListener('change', renderActiveSession);
+document.getElementById('event_date_to_detail').addEventListener('change', renderActiveSession);
 document.getElementById('refresh_detail').addEventListener('click', refreshActiveSession);
 document.getElementById('copy_resume_command').addEventListener('click', copyResumeCommand);
 updateCopyResumeButtonState();
