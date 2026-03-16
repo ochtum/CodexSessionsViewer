@@ -19,7 +19,7 @@ MAX_EVENTS = 2000
 SEARCH_TEXT_LIMIT = 50000
 SUMMARY_SCAN_LINE_LIMIT = 400
 SEARCH_INDEX_TEXT_LIMIT = SEARCH_TEXT_LIMIT
-SEARCH_INDEX_SCHEMA_VERSION = 3
+SEARCH_INDEX_SCHEMA_VERSION = 4
 SEARCH_INDEX_DB_PATH = Path(__file__).resolve().parent / '.cache' / 'search_index.sqlite3'
 ICON_DIR = Path(__file__).resolve().parent / 'icons'
 _CACHED_SESSIONS_DIR = None
@@ -347,6 +347,9 @@ def open_search_index_connection():
             conn.execute('DROP TABLE IF EXISTS session_index')
             conn.execute('DROP TABLE IF EXISTS session_label_links')
             conn.execute('DROP TABLE IF EXISTS event_label_links')
+    if 3 <= current_version < 4:
+        with conn:
+            conn.execute('DROP TABLE IF EXISTS session_index')
     conn.execute(
         '''
         CREATE TABLE IF NOT EXISTS session_index (
@@ -363,7 +366,9 @@ def open_search_index_connection():
             source TEXT NOT NULL,
             first_user_text TEXT NOT NULL,
             first_real_user_text TEXT NOT NULL,
-            search_text TEXT NOT NULL
+            search_text TEXT NOT NULL,
+            min_event_ts TEXT NOT NULL DEFAULT '',
+            max_event_ts TEXT NOT NULL DEFAULT ''
         )
         '''
     )
@@ -437,6 +442,8 @@ def summary_from_index_row(row):
         'source': row['source'],
         'first_user_text': row['first_user_text'],
         'first_real_user_text': row['first_real_user_text'],
+        'min_event_ts': row['min_event_ts'],
+        'max_event_ts': row['max_event_ts'],
     }
 
 
@@ -455,6 +462,8 @@ def build_search_index_record(path: Path, stat_result=None):
         'source': 'cli',
         'first_user_text': '',
         'first_real_user_text': '',
+        'min_event_ts': '',
+        'max_event_ts': '',
     }
     search_chunks = []
     search_len = 0
@@ -465,6 +474,12 @@ def build_search_index_record(path: Path, stat_result=None):
                 obj = json.loads(line)
                 t = obj.get('type')
                 payload = obj.get('payload', {})
+                line_ts = obj.get('timestamp', '')
+                if line_ts:
+                    if not summary['min_event_ts'] or line_ts < summary['min_event_ts']:
+                        summary['min_event_ts'] = line_ts
+                    if not summary['max_event_ts'] or line_ts > summary['max_event_ts']:
+                        summary['max_event_ts'] = line_ts
                 if t == 'session_meta':
                     summary['session_id'] = payload.get('id', '')
                     summary['started_at'] = payload.get('timestamp', '')
@@ -517,14 +532,6 @@ def build_search_index_record(path: Path, stat_result=None):
                         SEARCH_INDEX_TEXT_LIMIT,
                     )
 
-                if (
-                    SEARCH_INDEX_TEXT_LIMIT > 0
-                    and search_len >= SEARCH_INDEX_TEXT_LIMIT
-                    and summary['started_at']
-                    and summary['first_user_text']
-                    and summary['first_real_user_text']
-                ):
-                    break
     except Exception:
         pass
 
@@ -601,8 +608,9 @@ def sync_search_index(paths, prune_missing=True):
                         INSERT INTO session_index (
                             path, id, relative_path, mtime_iso, mtime_ns, size,
                             session_id, started_at, cwd, model, source,
-                            first_user_text, first_real_user_text, search_text
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            first_user_text, first_real_user_text, search_text,
+                            min_event_ts, max_event_ts
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(path) DO UPDATE SET
                             id = excluded.id,
                             relative_path = excluded.relative_path,
@@ -616,7 +624,9 @@ def sync_search_index(paths, prune_missing=True):
                             source = excluded.source,
                             first_user_text = excluded.first_user_text,
                             first_real_user_text = excluded.first_real_user_text,
-                            search_text = excluded.search_text
+                            search_text = excluded.search_text,
+                            min_event_ts = excluded.min_event_ts,
+                            max_event_ts = excluded.max_event_ts
                         ''',
                         (
                             summary['path'],
@@ -633,6 +643,8 @@ def sync_search_index(paths, prune_missing=True):
                             summary['first_user_text'],
                             summary['first_real_user_text'],
                             search_text,
+                            summary.get('min_event_ts', ''),
+                            summary.get('max_event_ts', ''),
                         ),
                     )
         finally:
@@ -655,7 +667,8 @@ def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_
         try:
             columns = (
                 'id, path, relative_path, mtime_iso, session_id, started_at, '
-                'cwd, model, source, first_user_text, first_real_user_text'
+                'cwd, model, source, first_user_text, first_real_user_text, '
+                'min_event_ts, max_event_ts'
             )
             where_clauses = []
             params = []
@@ -699,7 +712,8 @@ def fetch_session_summary_from_index(path: Path):
             row = conn.execute(
                 '''
                 SELECT id, path, relative_path, mtime_iso, session_id, started_at,
-                       cwd, model, source, first_user_text, first_real_user_text
+                       cwd, model, source, first_user_text, first_real_user_text,
+                       min_event_ts, max_event_ts
                 FROM session_index
                 WHERE path = ?
                 ''',
@@ -903,6 +917,8 @@ def build_session_summary(path: Path, stat_result=None):
         'first_user_text': '',
         'first_real_user_text': '',
         'search_text': '',
+        'min_event_ts': '',
+        'max_event_ts': '',
     }
     search_chunks = []
     search_len = 0
@@ -917,6 +933,12 @@ def build_session_summary(path: Path, stat_result=None):
                 obj = json.loads(line)
                 t = obj.get('type')
                 payload = obj.get('payload', {})
+                line_ts = obj.get('timestamp', '')
+                if line_ts:
+                    if not summary['min_event_ts'] or line_ts < summary['min_event_ts']:
+                        summary['min_event_ts'] = line_ts
+                    if not summary['max_event_ts'] or line_ts > summary['max_event_ts']:
+                        summary['max_event_ts'] = line_ts
                 if t == 'session_meta':
                     summary['session_id'] = payload.get('id', '')
                     summary['started_at'] = payload.get('timestamp', '')
@@ -2487,6 +2509,14 @@ pre {
               <input id="date_to" type="date" />
             </label>
             <label class="field">
+              <span>イベント開始日時</span>
+              <input id="event_date_from" type="datetime-local" step="1" />
+            </label>
+            <label class="field">
+              <span>イベント終了日時</span>
+              <input id="event_date_to" type="datetime-local" step="1" />
+            </label>
+            <label class="field">
               <span>source</span>
               <select id="source_filter">
                 <option value="all">source: all</option>
@@ -2569,6 +2599,16 @@ pre {
             <button id="detail_keyword_prev" class="secondary-action" title="P" disabled>前へ</button>
             <button id="detail_keyword_next" class="secondary-action" title="N" disabled>次へ</button>
             <button id="detail_keyword_clear" class="secondary-action" disabled>検索をクリア</button>
+          </div>
+          <div class="field-grid" style="margin-top:8px;">
+            <label class="field">
+              <span>イベント開始日時</span>
+              <input id="detail_event_date_from" type="datetime-local" step="1" />
+            </label>
+            <label class="field">
+              <span>イベント終了日時</span>
+              <input id="detail_event_date_to" type="datetime-local" step="1" />
+            </label>
           </div>
         </section>
         <section id="detail_message_range_row" class="detail-toolbar-row range">
@@ -2757,6 +2797,8 @@ const I18N = {
     'filter.copy': '期間・source・ラベルで一覧を整理します。',
     'filter.dateFrom': '開始日',
     'filter.dateTo': '終了日',
+    'filter.eventDateFrom': 'イベント開始日時',
+    'filter.eventDateTo': 'イベント終了日時',
     'filter.source': 'source',
     'filter.sessionLabel': 'セッションラベル',
     'filter.eventLabel': 'イベントラベル',
@@ -2797,6 +2839,8 @@ const I18N = {
     'detail.prev': '前へ',
     'detail.next': '次へ',
     'detail.searchClear': '検索をクリア',
+    'detail.eventDateFrom': 'イベント開始日時',
+    'detail.eventDateTo': 'イベント終了日時',
     'detail.range': '範囲選択',
     'detail.rangeMode': '起点選択モード',
     'detail.rangeModeEnd': '起点選択終了',
@@ -2899,6 +2943,8 @@ const I18N = {
     'filter.copy': 'Organize the list by time range, source, and labels.',
     'filter.dateFrom': 'Start date',
     'filter.dateTo': 'End date',
+    'filter.eventDateFrom': 'Event start date/time',
+    'filter.eventDateTo': 'Event end date/time',
     'filter.source': 'Source',
     'filter.sessionLabel': 'Session label',
     'filter.eventLabel': 'Event label',
@@ -2939,6 +2985,8 @@ const I18N = {
     'detail.prev': 'Prev',
     'detail.next': 'Next',
     'detail.searchClear': 'Clear search',
+    'detail.eventDateFrom': 'Event start date/time',
+    'detail.eventDateTo': 'Event end date/time',
     'detail.range': 'Range',
     'detail.rangeMode': 'Anchor mode',
     'detail.rangeModeEnd': 'End anchor mode',
@@ -3041,6 +3089,8 @@ const I18N = {
     'filter.copy': '按时间范围、source 和标签整理列表。',
     'filter.dateFrom': '开始日期',
     'filter.dateTo': '结束日期',
+    'filter.eventDateFrom': '事件开始日期时间',
+    'filter.eventDateTo': '事件结束日期时间',
     'filter.source': '来源',
     'filter.sessionLabel': '会话标签',
     'filter.eventLabel': '事件标签',
@@ -3081,6 +3131,8 @@ const I18N = {
     'detail.prev': '上一项',
     'detail.next': '下一项',
     'detail.searchClear': '清除搜索',
+    'detail.eventDateFrom': '事件开始日期时间',
+    'detail.eventDateTo': '事件结束日期时间',
     'detail.range': '范围',
     'detail.rangeMode': '锚点模式',
     'detail.rangeModeEnd': '结束锚点模式',
@@ -3181,6 +3233,8 @@ I18N['zh-Hant'] = {
   'filter.copy': '按時間範圍、source 和標籤整理列表。',
   'filter.dateFrom': '開始日期',
   'filter.dateTo': '結束日期',
+  'filter.eventDateFrom': '事件開始日期時間',
+  'filter.eventDateTo': '事件結束日期時間',
   'filter.source': '來源',
   'filter.eventLabel': '事件標籤',
   'placeholder.cwd': 'cwd（部分比對）',
@@ -3212,6 +3266,8 @@ I18N['zh-Hant'] = {
   'detail.prev': '上一項',
   'detail.next': '下一項',
   'detail.searchClear': '清除搜尋',
+  'detail.eventDateFrom': '事件開始日期時間',
+  'detail.eventDateTo': '事件結束日期時間',
   'detail.range': '範圍',
   'detail.rangeMode': '錨點模式',
   'detail.rangeModeEnd': '結束錨點模式',
@@ -3371,6 +3427,8 @@ function applyMainLanguage(){
   setText('.toolbar-section:nth-of-type(2) .toolbar-section-copy', t('filter.copy'));
   setFieldLabel('date_from', t('filter.dateFrom'));
   setFieldLabel('date_to', t('filter.dateTo'));
+  setFieldLabel('event_date_from', t('filter.eventDateFrom'));
+  setFieldLabel('event_date_to', t('filter.eventDateTo'));
   setFieldLabel('source_filter', t('filter.source'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
@@ -3403,6 +3461,8 @@ function applyMainLanguage(){
   setTextById('detail_keyword_prev', t('detail.prev'));
   setTextById('detail_keyword_next', t('detail.next'));
   setTextById('detail_keyword_clear', t('detail.searchClear'));
+  setFieldLabel('detail_event_date_from', t('detail.eventDateFrom'));
+  setFieldLabel('detail_event_date_to', t('detail.eventDateTo'));
   setText('.detail-toolbar-row.range .detail-group-title', t('detail.range'));
   setTextById('clear_message_range_selection', t('detail.rangeClear'));
   const shortcutDescriptions = [
@@ -3971,6 +4031,24 @@ function parseOptionalDateEnd(raw){
   return Number.isNaN(ts) ? null : ts;
 }
 
+function parseOptionalDatetimeStart(raw){
+  if(!raw) return null;
+  // raw is expected as YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS from <input type="datetime-local">.
+  const ts = toTimestamp(raw);
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function parseOptionalDatetimeEnd(raw){
+  if(!raw) return null;
+  // raw is expected as YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS from <input type="datetime-local">.
+  // Use end-of-second for inclusive filtering.
+  const ts = toTimestamp(raw);
+  if(Number.isNaN(ts)) return null;
+  // If only minutes precision, add 59.999 seconds
+  if(raw.length <= 16) return ts + 59999;
+  return ts + 999;
+}
+
 function getActiveSessionId(){
   if(!state.activeSession) return '';
   return (state.activeSession.session_id || state.activeSession.id || '').toString().trim();
@@ -4472,7 +4550,9 @@ function hasDetailFilter(){
     state.isEventSelectionMode ||
     ((state.selectedEventIds && state.selectedEventIds.size) || 0) > 0 ||
     state.isMessageRangeSelectionMode ||
-    state.selectedMessageRangeEventId
+    state.selectedMessageRangeEventId ||
+    document.getElementById('detail_event_date_from').value ||
+    document.getElementById('detail_event_date_to').value
   );
 }
 
@@ -4489,6 +4569,8 @@ function hasListFilter(){
     document.getElementById('cwd_q').value.trim() ||
     document.getElementById('date_from').value ||
     document.getElementById('date_to').value ||
+    document.getElementById('event_date_from').value ||
+    document.getElementById('event_date_to').value ||
     document.getElementById('q').value.trim() ||
     normalizeSourceFilter(document.getElementById('source_filter').value || 'all') !== 'all' ||
     getSelectedSessionLabelFilter() ||
@@ -4615,12 +4697,16 @@ function saveFilters(){
     cwd_q: document.getElementById('cwd_q').value,
     date_from: document.getElementById('date_from').value,
     date_to: document.getElementById('date_to').value,
+    event_date_from: document.getElementById('event_date_from').value,
+    event_date_to: document.getElementById('event_date_to').value,
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
     detail_event_label_filter: getSelectedDetailEventLabelFilter(),
+    detail_event_date_from: document.getElementById('detail_event_date_from').value,
+    detail_event_date_to: document.getElementById('detail_event_date_to').value,
     filters_visible: filtersVisible,
     detail_actions_visible: detailActionsVisible,
     left_pane_visible: leftPaneVisible,
@@ -4645,6 +4731,8 @@ function restoreFilters(){
     if(typeof data.cwd_q === 'string') document.getElementById('cwd_q').value = data.cwd_q;
     if(typeof data.date_from === 'string') document.getElementById('date_from').value = data.date_from;
     if(typeof data.date_to === 'string') document.getElementById('date_to').value = data.date_to;
+    if(typeof data.event_date_from === 'string') document.getElementById('event_date_from').value = data.event_date_from;
+    if(typeof data.event_date_to === 'string') document.getElementById('event_date_to').value = data.event_date_to;
     if(typeof data.q === 'string') document.getElementById('q').value = data.q;
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
@@ -4652,6 +4740,8 @@ function restoreFilters(){
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
+    if(typeof data.detail_event_date_from === 'string') document.getElementById('detail_event_date_from').value = data.detail_event_date_from;
+    if(typeof data.detail_event_date_to === 'string') document.getElementById('detail_event_date_to').value = data.detail_event_date_to;
     if(typeof data.filters_visible === 'boolean') filtersVisible = data.filters_visible;
     if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
     if(typeof data.left_pane_visible === 'boolean') leftPaneVisible = data.left_pane_visible;
@@ -4665,12 +4755,16 @@ function clearFilters(){
   document.getElementById('cwd_q').value = '';
   document.getElementById('date_from').value = '';
   document.getElementById('date_to').value = '';
+  document.getElementById('event_date_from').value = '';
+  document.getElementById('event_date_to').value = '';
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
   document.getElementById('detail_event_label_filter').value = '';
+  document.getElementById('detail_event_date_from').value = '';
+  document.getElementById('detail_event_date_to').value = '';
   try {
     localStorage.removeItem(FILTER_STORAGE_KEY);
   } catch (e) {
@@ -4690,6 +4784,10 @@ function applyFilter(){
   const toRaw = document.getElementById('date_to').value;
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
+  const evFromRaw = document.getElementById('event_date_from').value;
+  const evToRaw = document.getElementById('event_date_to').value;
+  const evFromTs = parseOptionalDatetimeStart(evFromRaw);
+  const evToTs = parseOptionalDatetimeEnd(evToRaw);
   state.filtered = state.sessions.filter(s => {
     const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
     const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
@@ -4709,7 +4807,23 @@ function applyFilter(){
       }
     }
 
-    return cwdMatched && sourceMatched && dateMatched;
+    let eventDateMatched = true;
+    if(evFromTs !== null || evToTs !== null){
+      const minTs = s.min_event_ts ? toTimestamp(s.min_event_ts) : NaN;
+      const maxTs = s.max_event_ts ? toTimestamp(s.max_event_ts) : NaN;
+      if(Number.isNaN(minTs) || Number.isNaN(maxTs)){
+        eventDateMatched = false;
+      } else {
+        if(evFromTs !== null && maxTs < evFromTs){
+          eventDateMatched = false;
+        }
+        if(evToTs !== null && minTs > evToTs){
+          eventDateMatched = false;
+        }
+      }
+    }
+
+    return cwdMatched && sourceMatched && dateMatched && eventDateMatched;
   });
   saveFilters();
   renderSessionList();
@@ -4817,6 +4931,19 @@ function getDisplayEvents(){
   }
   if(detailKeywordFilterTerm !== ''){
     events = events.filter(ev => containsLiteralKeyword(getEventBodyText(ev), detailKeywordFilterTerm));
+  }
+  const detailEvFromRaw = document.getElementById('detail_event_date_from').value;
+  const detailEvToRaw = document.getElementById('detail_event_date_to').value;
+  const detailEvFromTs = parseOptionalDatetimeStart(detailEvFromRaw);
+  const detailEvToTs = parseOptionalDatetimeEnd(detailEvToRaw);
+  if(detailEvFromTs !== null || detailEvToTs !== null){
+    events = events.filter(ev => {
+      const evTs = ev.timestamp ? toTimestamp(ev.timestamp) : NaN;
+      if(Number.isNaN(evTs)) return false;
+      if(detailEvFromTs !== null && evTs < detailEvFromTs) return false;
+      if(detailEvToTs !== null && evTs > detailEvToTs) return false;
+      return true;
+    });
   }
   if(document.getElementById('reverse_order').checked){
     events = [...events].reverse();
@@ -5059,6 +5186,8 @@ function clearDetailFilters(){
   if(detailKeywordInput){
     detailKeywordInput.value = '';
   }
+  document.getElementById('detail_event_date_from').value = '';
+  document.getElementById('detail_event_date_to').value = '';
   resetDetailKeywordState();
   state.isEventSelectionMode = false;
   clearSelectedEventIds();
@@ -5438,12 +5567,22 @@ function moveDetailKeywordSearchByShortcut(step){
 document.getElementById('cwd_q').addEventListener('input', applyFilter);
 document.getElementById('date_from').addEventListener('change', applyFilter);
 document.getElementById('date_to').addEventListener('change', applyFilter);
+document.getElementById('event_date_from').addEventListener('change', applyFilter);
+document.getElementById('event_date_to').addEventListener('change', applyFilter);
 document.getElementById('q').addEventListener('input', scheduleLoadSessions);
 document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
 document.getElementById('session_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('detail_event_label_filter').addEventListener('change', () => {
+  saveFilters();
+  renderActiveSession();
+});
+document.getElementById('detail_event_date_from').addEventListener('change', () => {
+  saveFilters();
+  renderActiveSession();
+});
+document.getElementById('detail_event_date_to').addEventListener('change', () => {
   saveFilters();
   renderActiveSession();
 });
