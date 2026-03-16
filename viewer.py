@@ -1706,8 +1706,9 @@ button:disabled {
   box-shadow: var(--shadow-soft);
 }
 .session-item.active {
-  border-color: rgba(15, 118, 110, 0.28);
-  background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0.96));
+  border-color: rgba(15, 118, 110, 0.45);
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.14), rgba(15, 118, 110, 0.06));
   box-shadow: var(--shadow-medium);
 }
 .session-path {
