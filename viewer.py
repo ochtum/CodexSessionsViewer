@@ -675,12 +675,18 @@ def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_
                 )
                 params.append(event_label_id)
             where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
-            direction = 'ASC' if sort == 'asc' else 'DESC'
+            if sort == 'updated':
+                order_sql = 'ORDER BY mtime_ns DESC'
+            else:
+                direction = 'ASC' if sort == 'asc' else 'DESC'
+                order_sql = (
+                    'ORDER BY '
+                    f"CASE WHEN started_at IS NOT NULL AND started_at <> '' THEN started_at ELSE mtime_iso END {direction}, "
+                    f'mtime_ns {direction}'
+                )
             sql = (
                 f'SELECT {columns} FROM session_index {where_sql} '
-                'ORDER BY '
-                f"CASE WHEN started_at IS NOT NULL AND started_at <> '' THEN started_at ELSE mtime_iso END {direction}, "
-                f'mtime_ns {direction} LIMIT ?'
+                f'{order_sql} LIMIT ?'
             )
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
@@ -2512,6 +2518,7 @@ pre {
               <select id="sort_order">
                 <option value="desc">新しい順</option>
                 <option value="asc">古い順</option>
+                <option value="updated">最終更新日時順</option>
               </select>
             </label>
           </div>
@@ -2776,6 +2783,7 @@ const I18N = {
     'filter.sort': '並び順',
     'filter.sort.desc': '新しい順',
     'filter.sort.asc': '古い順',
+    'filter.sort.updated': '最終更新日時順',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd (部分一致)',
@@ -2921,6 +2929,7 @@ const I18N = {
     'filter.sort': 'Sort order',
     'filter.sort.desc': 'Newest first',
     'filter.sort.asc': 'Oldest first',
+    'filter.sort.updated': 'Last updated',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd (partial match)',
@@ -3066,6 +3075,7 @@ const I18N = {
     'filter.sort': '排序',
     'filter.sort.desc': '最新优先',
     'filter.sort.asc': '最旧优先',
+    'filter.sort.updated': '最后更新时间',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd（部分匹配）',
@@ -3203,6 +3213,7 @@ I18N['zh-Hant'] = {
   'filter.sort': '排序',
   'filter.sort.desc': '最新優先',
   'filter.sort.asc': '最舊優先',
+  'filter.sort.updated': '最後更新時間',
   'placeholder.cwd': 'cwd（部分比對）',
   'placeholder.keyword': '關鍵字篩選',
   'placeholder.detailKeyword': '詳細關鍵字',
@@ -3405,6 +3416,7 @@ function applyMainLanguage(){
   setOptionText('source_filter', 2, t('filter.source.vscode'));
   setOptionText('sort_order', 0, t('filter.sort.desc'));
   setOptionText('sort_order', 1, t('filter.sort.asc'));
+  setOptionText('sort_order', 2, t('filter.sort.updated'));
   setText('.detail-toolbar-row.primary .detail-group-title', t('detail.display'));
   setToggleLabel('only_user_instruction', t('detail.toggle.user'));
   setToggleLabel('only_ai_response', t('detail.toggle.ai'));
@@ -4677,7 +4689,7 @@ function restoreFilters(){
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
     document.getElementById('source_filter').value = source;
-    if(data.sort_order === 'asc' || data.sort_order === 'desc') document.getElementById('sort_order').value = data.sort_order;
+    if(data.sort_order === 'asc' || data.sort_order === 'desc' || data.sort_order === 'updated') document.getElementById('sort_order').value = data.sort_order;
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
@@ -6995,7 +7007,7 @@ class Handler(BaseHTTPRequestHandler):
             event_label_id = parse_optional_int(q.get('event_label_id', [''])[0])
             if mode not in ('and', 'or'):
                 mode = 'and'
-            if sort not in ('asc', 'desc'):
+            if sort not in ('asc', 'desc', 'updated'):
                 sort = 'desc'
             files = iter_all_session_files(roots)
             sync_search_index(files, prune_missing=True)
