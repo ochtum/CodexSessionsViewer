@@ -1228,21 +1228,21 @@ header {
 .header-main::before {
   content: "";
   position: absolute;
-  inset: -28px auto auto -18px;
+  inset: -48px auto auto -46px;
   width: 150px;
   height: 92px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(125, 211, 252, 0.22) 0%, rgba(125, 211, 252, 0) 72%);
+  background: radial-gradient(circle, rgba(125, 211, 252, 0.14) 0%, rgba(125, 211, 252, 0) 72%);
   pointer-events: none;
 }
 .header-main::after {
   content: "";
   position: absolute;
-  inset: auto -32px -40px auto;
+  inset: auto -54px -56px auto;
   width: 180px;
   height: 120px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(15, 118, 110, 0.12) 0%, rgba(15, 118, 110, 0) 74%);
+  background: radial-gradient(circle, rgba(15, 118, 110, 0.08) 0%, rgba(15, 118, 110, 0) 74%);
   pointer-events: none;
 }
 header h1 {
