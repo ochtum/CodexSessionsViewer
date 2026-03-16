@@ -644,7 +644,7 @@ def sync_search_index(paths, prune_missing=True):
     return indexed
 
 
-def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_label_id=None, event_label_id=None):
+def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_label_id=None, event_label_id=None, sort='desc'):
     normalized_terms = []
     for term in query.split():
         normalized = normalize_search_text(term)
@@ -675,11 +675,18 @@ def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_
                 )
                 params.append(event_label_id)
             where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
+            if sort == 'updated':
+                order_sql = 'ORDER BY mtime_ns DESC'
+            else:
+                direction = 'ASC' if sort == 'asc' else 'DESC'
+                order_sql = (
+                    'ORDER BY '
+                    f"CASE WHEN started_at IS NOT NULL AND started_at <> '' THEN started_at ELSE mtime_iso END {direction}, "
+                    f'mtime_ns {direction}'
+                )
             sql = (
                 f'SELECT {columns} FROM session_index {where_sql} '
-                'ORDER BY '
-                "CASE WHEN started_at IS NOT NULL AND started_at <> '' THEN started_at ELSE mtime_iso END DESC, "
-                'mtime_ns DESC LIMIT ?'
+                f'{order_sql} LIMIT ?'
             )
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
@@ -1402,6 +1409,28 @@ header h1 {
   min-height: 0;
   overflow: auto;
 }
+.session-count {
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  background: rgba(246, 250, 255, 0.6);
+}
+.session-count:empty {
+  display: none;
+}
+.match-counter {
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+.match-counter.hidden {
+  display: none;
+}
 .toolbar-topline,
 .detail-toolbar-topline {
   display: flex;
@@ -1680,6 +1709,37 @@ button:disabled {
   margin: 0;
   accent-color: var(--accent);
 }
+.sort-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+}
+.sort-tab {
+  flex: 1;
+  padding: 7px 4px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sort-tab:hover {
+  color: var(--text);
+  background: rgba(15, 118, 110, 0.04);
+}
+.sort-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(15, 118, 110, 0.06);
+}
 #sessions {
   height: 100%;
   overflow-x: hidden;
@@ -1706,8 +1766,9 @@ button:disabled {
   box-shadow: var(--shadow-soft);
 }
 .session-item.active {
-  border-color: rgba(15, 118, 110, 0.28);
-  background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0.96));
+  border-color: rgba(15, 118, 110, 0.45);
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.14), rgba(15, 118, 110, 0.06));
   box-shadow: var(--shadow-medium);
 }
 .session-path {
@@ -2510,6 +2571,12 @@ pre {
         </section>
       </div>
     </div>
+    <div id="session_count" class="session-count" aria-live="polite"></div>
+    <div class="sort-tabs" role="tablist">
+      <button class="sort-tab active" data-sort="desc" role="tab" aria-selected="true">新しい順</button>
+      <button class="sort-tab" data-sort="asc" role="tab" aria-selected="false">古い順</button>
+      <button class="sort-tab" data-sort="updated" role="tab" aria-selected="false">最終更新日時順</button>
+    </div>
     <div class="content-shell">
       <div id="sessions"></div>
       <div id="sessions_status" class="status-layer hidden" aria-live="polite"></div>
@@ -2568,6 +2635,7 @@ pre {
             <button id="detail_keyword_search" disabled>検索</button>
             <button id="detail_keyword_prev" class="secondary-action" title="P" disabled>前へ</button>
             <button id="detail_keyword_next" class="secondary-action" title="N" disabled>次へ</button>
+            <span id="detail_keyword_match_count" class="match-counter hidden"></span>
             <button id="detail_keyword_clear" class="secondary-action" disabled>検索をクリア</button>
           </div>
         </section>
@@ -2765,6 +2833,10 @@ const I18N = {
     'filter.source.vscode': 'source: VS Code',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'filter.sort': '並び順',
+    'filter.sort.desc': '新しい順',
+    'filter.sort.asc': '古い順',
+    'filter.sort.updated': '最終更新日時順',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd (部分一致)',
@@ -2839,9 +2911,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(previewなし)',
     'status.sessions.loadingTitle': 'セッション一覧を読み込み中...',
     'status.sessions.loadingCopy': '最新のセッションを確認しています。',
@@ -2907,6 +2981,10 @@ const I18N = {
     'filter.source.vscode': 'source: VS Code',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'filter.sort': 'Sort order',
+    'filter.sort.desc': 'Newest first',
+    'filter.sort.asc': 'Oldest first',
+    'filter.sort.updated': 'Last updated',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd (partial match)',
@@ -2981,9 +3059,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(no preview)',
     'status.sessions.loadingTitle': 'Loading sessions...',
     'status.sessions.loadingCopy': 'Checking the latest sessions.',
@@ -3049,6 +3129,10 @@ const I18N = {
     'filter.source.vscode': 'source: VS Code',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'filter.sort': '排序',
+    'filter.sort.desc': '最新优先',
+    'filter.sort.asc': '最旧优先',
+    'filter.sort.updated': '最后更新时间',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd（部分匹配）',
@@ -3123,9 +3207,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(无预览)',
     'status.sessions.loadingTitle': '正在加载会话列表...',
     'status.sessions.loadingCopy': '正在检查最新会话。',
@@ -3183,6 +3269,10 @@ I18N['zh-Hant'] = {
   'filter.dateTo': '結束日期',
   'filter.source': '來源',
   'filter.eventLabel': '事件標籤',
+  'filter.sort': '排序',
+  'filter.sort.desc': '最新優先',
+  'filter.sort.asc': '最舊優先',
+  'filter.sort.updated': '最後更新時間',
   'placeholder.cwd': 'cwd（部分比對）',
   'placeholder.keyword': '關鍵字篩選',
   'placeholder.detailKeyword': '詳細關鍵字',
@@ -3374,6 +3464,10 @@ function applyMainLanguage(){
   setFieldLabel('source_filter', t('filter.source'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
+  document.querySelectorAll('.sort-tab').forEach(tab => {
+    const key = 'filter.sort.' + tab.dataset.sort;
+    tab.textContent = t(key);
+  });
   document.getElementById('cwd_q').placeholder = t('placeholder.cwd');
   document.getElementById('q').placeholder = t('placeholder.keyword');
   document.getElementById('detail_keyword_q').placeholder = t('placeholder.detailKeyword');
@@ -4164,6 +4258,17 @@ function updateDetailKeywordControls(searchMeta){
   clearButton.disabled = !hasKeywordState;
   filterButton.classList.toggle('active', hasActiveSession && detailKeywordFilterTerm !== '');
   searchButton.classList.toggle('active', hasActiveSession && detailKeywordSearchTerm !== '');
+  const matchCountEl = document.getElementById('detail_keyword_match_count');
+  if(matchCountEl){
+    if(hasSearchMatches){
+      const current = detailKeywordCurrentMatchIndex >= 0 ? detailKeywordCurrentMatchIndex + 1 : 0;
+      matchCountEl.textContent = t('detail.matchCounter', { current: current, total: searchTotal });
+      matchCountEl.classList.remove('hidden');
+    } else {
+      matchCountEl.textContent = '';
+      matchCountEl.classList.add('hidden');
+    }
+  }
   updateClearDetailButtonState();
 }
 
@@ -4527,6 +4632,19 @@ function normalizeRequestError(error, fallback){
   return fallback;
 }
 
+function getActiveSortOrder(){
+  const active = document.querySelector('.sort-tab.active');
+  return active ? active.dataset.sort : 'desc';
+}
+
+function setActiveSortOrder(value){
+  document.querySelectorAll('.sort-tab').forEach(tab => {
+    const isActive = tab.dataset.sort === value;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+}
+
 async function loadSessions(options){
   saveFilters();
   const requestId = ++loadSessionsRequestSeq;
@@ -4549,6 +4667,10 @@ async function loadSessions(options){
   }
   if(eventLabelId){
     params.set('event_label_id', eventLabelId);
+  }
+  const sortOrder = getActiveSortOrder();
+  if(sortOrder && sortOrder !== 'desc'){
+    params.set('sort', sortOrder);
   }
   try {
     const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
@@ -4618,6 +4740,7 @@ function saveFilters(){
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
+    sort_order: getActiveSortOrder(),
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
     detail_event_label_filter: getSelectedDetailEventLabelFilter(),
@@ -4649,6 +4772,7 @@ function restoreFilters(){
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
     document.getElementById('source_filter').value = source;
+    if(data.sort_order === 'asc' || data.sort_order === 'desc' || data.sort_order === 'updated') setActiveSortOrder(data.sort_order);
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
@@ -4668,6 +4792,7 @@ function clearFilters(){
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
+  setActiveSortOrder('desc');
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
   document.getElementById('detail_event_label_filter').value = '';
@@ -4770,6 +4895,14 @@ function renderSessionList(){
   box.querySelectorAll('.session-item').forEach(el => {
     el.onclick = () => openSession(el.dataset.path);
   });
+  const countEl = document.getElementById('session_count');
+  if(countEl){
+    if(state.hasLoadedSessions && state.sessions.length > 0){
+      countEl.textContent = t('summary.sessions', { filtered: state.filtered.length, total: state.sessions.length });
+    } else {
+      countEl.textContent = '';
+    }
+  }
 }
 
 function getDisplayEvents(){
@@ -5441,6 +5574,12 @@ document.getElementById('date_to').addEventListener('change', applyFilter);
 document.getElementById('q').addEventListener('input', scheduleLoadSessions);
 document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
 document.getElementById('source_filter').addEventListener('change', applyFilter);
+document.querySelectorAll('.sort-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    setActiveSortOrder(tab.dataset.sort);
+    scheduleLoadSessions();
+  });
+});
 document.getElementById('session_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
 document.getElementById('detail_event_label_filter').addEventListener('change', () => {
@@ -6959,10 +7098,13 @@ class Handler(BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(parsed.query)
             raw_query = q.get('q', [''])[0].strip()
             mode = q.get('mode', ['and'])[0].strip().lower()
+            sort = q.get('sort', ['desc'])[0].strip().lower()
             session_label_id = parse_optional_int(q.get('session_label_id', [''])[0])
             event_label_id = parse_optional_int(q.get('event_label_id', [''])[0])
             if mode not in ('and', 'or'):
                 mode = 'and'
+            if sort not in ('asc', 'desc', 'updated'):
+                sort = 'desc'
             files = iter_all_session_files(roots)
             sync_search_index(files, prune_missing=True)
             sessions = fetch_sessions_from_search_index(
@@ -6971,6 +7113,7 @@ class Handler(BaseHTTPRequestHandler):
                 MAX_LIST,
                 session_label_id=session_label_id,
                 event_label_id=event_label_id,
+                sort=sort,
             )
             self._send_json({'root': ' | '.join(str(x) for x in roots), 'sessions': sessions})
             return
