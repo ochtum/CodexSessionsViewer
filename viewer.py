@@ -4157,7 +4157,7 @@ function updateDetailKeywordControls(searchMeta){
   const hasSearchMatches = searchTotal > 0;
   const hasKeywordState = hasInputValue || detailKeywordFilterTerm !== '' || detailKeywordSearchTerm !== '';
   input.disabled = !hasActiveSession;
-  filterButton.disabled = !hasActiveSession || !hasInputValue;
+  filterButton.disabled = !hasActiveSession || (!hasInputValue && detailKeywordFilterTerm === '');
   searchButton.disabled = !hasActiveSession || !hasInputValue;
   prevButton.disabled = !hasSearchMatches;
   nextButton.disabled = !hasSearchMatches;
@@ -4999,7 +4999,12 @@ function clearDetailMessageRangeSelection(){
 
 function applyDetailKeywordFilter(){
   noteDetailInteraction();
-  detailKeywordFilterTerm = getDetailKeywordInputValue();
+  const inputValue = getDetailKeywordInputValue();
+  if(detailKeywordFilterTerm !== '' && (detailKeywordFilterTerm === inputValue || inputValue === '')){
+    detailKeywordFilterTerm = '';
+  } else {
+    detailKeywordFilterTerm = inputValue;
+  }
   const eventsBox = document.getElementById('events');
   if(eventsBox){
     eventsBox.scrollTop = 0;
