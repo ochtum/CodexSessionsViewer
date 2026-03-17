@@ -2505,6 +2505,13 @@ button:disabled {
   align-items: center;
   gap: 8px;
 }
+.label-picker-option .label-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--label-color);
+  flex: 0 0 auto;
+}
 .label-picker-empty {
   padding: 6px 8px;
   color: var(--muted);
@@ -3947,8 +3954,6 @@ let datePickers = [];
 let dateTimePickers = [];
 let filtersVisible = true;
 let detailActionsVisible = true;
-let filtersVisible = false;
-let detailActionsVisible = false;
 let detailMetaVisible = false;
 let leftPaneVisible = true;
 let pendingAutomaticDetailSync = false;
@@ -4649,7 +4654,7 @@ function setupDateTimeSegmentInput(input){
     }
   });
   input.addEventListener('input', (event) => {
-    if(event && event.inputType !== 'insertFromPaste'){
+    if(event && typeof event.inputType === 'string' && event.inputType !== 'insertFromPaste'){
       return;
     }
     const iso = parseDateTimeInputToIso(input.value || '');
@@ -4661,17 +4666,22 @@ function setupDateTimeSegmentInput(input){
   });
   input.addEventListener('paste', (event) => {
     const text = event.clipboardData ? event.clipboardData.getData('text') : '';
-    const previous = input.value;
     const iso = parseDateTimeInputToIso(text || '');
-    if(!iso){
-      // Avoid broken partial insertion into a single segment.
+    if(iso){
       event.preventDefault();
-      input.value = previous;
+      input.value = formatDateTimeInputFromIso(iso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
       return;
     }
-    event.preventDefault();
-    input.value = formatDateTimeInputFromIso(iso);
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    // Some environments do not expose clipboardData; normalize after default paste.
+    setTimeout(() => {
+      const fallbackIso = parseDateTimeInputToIso(input.value || '');
+      if(!fallbackIso){
+        return;
+      }
+      input.value = formatDateTimeInputFromIso(fallbackIso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 0);
   });
 }
 
@@ -4776,7 +4786,7 @@ function setupDateSegmentInput(input){
     }
   });
   input.addEventListener('input', (event) => {
-    if(event && event.inputType !== 'insertFromPaste'){
+    if(event && typeof event.inputType === 'string' && event.inputType !== 'insertFromPaste'){
       return;
     }
     const iso = parseDateInputToIso(input.value || '');
@@ -4788,16 +4798,21 @@ function setupDateSegmentInput(input){
   });
   input.addEventListener('paste', (event) => {
     const text = event.clipboardData ? event.clipboardData.getData('text') : '';
-    const previous = input.value;
     const iso = parseDateInputToIso(text || '');
-    if(!iso){
+    if(iso){
       event.preventDefault();
-      input.value = previous;
+      input.value = formatDateInputFromIso(iso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
       return;
     }
-    event.preventDefault();
-    input.value = formatDateInputFromIso(iso);
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    setTimeout(() => {
+      const fallbackIso = parseDateInputToIso(input.value || '');
+      if(!fallbackIso){
+        return;
+      }
+      input.value = formatDateInputFromIso(fallbackIso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 0);
   });
 }
 
@@ -6550,62 +6565,70 @@ function moveDetailKeywordSearchByShortcut(step){
   return true;
 }
 
-document.getElementById('cwd_q').addEventListener('input', applyFilter);
-document.getElementById('date_from').addEventListener('change', applyFilter);
-document.getElementById('date_to').addEventListener('change', applyFilter);
-document.getElementById('event_date_from').addEventListener('change', applyFilter);
-document.getElementById('event_date_to').addEventListener('change', applyFilter);
-document.getElementById('q').addEventListener('input', scheduleLoadSessions);
-document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
-document.getElementById('source_filter').addEventListener('change', applyFilter);
+function safeBindById(id, eventName, handler){
+  const node = document.getElementById(id);
+  if(!node){
+    return;
+  }
+  node.addEventListener(eventName, handler);
+}
+
+safeBindById('cwd_q', 'input', applyFilter);
+safeBindById('date_from', 'change', applyFilter);
+safeBindById('date_to', 'change', applyFilter);
+safeBindById('event_date_from', 'change', applyFilter);
+safeBindById('event_date_to', 'change', applyFilter);
+safeBindById('q', 'input', scheduleLoadSessions);
+safeBindById('mode', 'change', scheduleLoadSessions);
+safeBindById('source_filter', 'change', applyFilter);
 document.querySelectorAll('.sort-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     setActiveSortOrder(tab.dataset.sort);
     scheduleLoadSessions();
   });
 });
-document.getElementById('session_label_filter').addEventListener('change', scheduleLoadSessions);
-document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
-document.getElementById('detail_event_label_filter').addEventListener('change', () => {
+safeBindById('session_label_filter', 'change', scheduleLoadSessions);
+safeBindById('event_label_filter', 'change', scheduleLoadSessions);
+safeBindById('detail_event_label_filter', 'change', () => {
   saveFilters();
   renderActiveSession();
 });
-document.getElementById('detail_event_date_from').addEventListener('change', () => {
+safeBindById('detail_event_date_from', 'change', () => {
   saveFilters();
   renderActiveSession();
 });
-document.getElementById('detail_event_date_to').addEventListener('change', () => {
+safeBindById('detail_event_date_to', 'change', () => {
   saveFilters();
   renderActiveSession();
 });
-document.getElementById('clear_detail_event_date').addEventListener('click', () => {
+safeBindById('clear_detail_event_date', 'click', () => {
   document.getElementById('detail_event_date_from').value = '';
   document.getElementById('detail_event_date_to').value = '';
   saveFilters();
   renderActiveSession();
 });
-document.getElementById('toggle_filters').addEventListener('click', () => {
+safeBindById('toggle_filters', 'click', () => {
   setFiltersVisible(!filtersVisible);
 });
-document.getElementById('toggle_session_list_mobile').addEventListener('click', () => {
+safeBindById('toggle_session_list_mobile', 'click', () => {
   setLeftPaneVisible(!leftPaneVisible);
 });
-document.getElementById('toggle_detail_actions').addEventListener('click', () => {
+safeBindById('toggle_detail_actions', 'click', () => {
   setDetailActionsVisible(!detailActionsVisible);
 });
-document.getElementById('open_shortcuts').addEventListener('click', openShortcutDialog);
-document.getElementById('close_shortcuts').addEventListener('click', closeShortcutDialog);
-document.getElementById('toggle_meta').addEventListener('click', () => {
+safeBindById('open_shortcuts', 'click', openShortcutDialog);
+safeBindById('close_shortcuts', 'click', closeShortcutDialog);
+safeBindById('toggle_meta', 'click', () => {
   setDetailMetaVisible(!detailMetaVisible);
 });
-document.getElementById('reload').addEventListener('click', () => {
+safeBindById('reload', 'click', () => {
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
   }
   loadSessions({ mode: 'reload' });
 });
-document.getElementById('clear').addEventListener('click', clearFilters);
+safeBindById('clear', 'click', clearFilters);
 document.getElementById('only_user_instruction').addEventListener('change', () => {
   renderActiveSession();
 });
