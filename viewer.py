@@ -1155,6 +1155,7 @@ HTML_PAGE = """<!doctype html>
   --accent: #0f766e;
   --accent-strong: #0b5c57;
   --accent-soft: rgba(15, 118, 110, 0.12);
+  --accent-ring: rgba(15, 118, 110, 0.16);
   --info: #1d4ed8;
   --info-soft: rgba(29, 78, 216, 0.1);
   --support: #7c3aed;
@@ -1168,7 +1169,7 @@ HTML_PAGE = """<!doctype html>
   --dev: #b45309;
   --system: #64748b;
   --sidebar-width: 320px;
-  --font-sans: "Aptos", "Segoe UI", "Yu Gothic UI", sans-serif;
+  --font-sans: "Inter", "Noto Sans JP", "Aptos", "Segoe UI", "Yu Gothic UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --text-kicker: 10px;
   --text-label: 11px;
@@ -1566,214 +1567,256 @@ header h1 {
 .field.field-grow > input {
   width: 100%;
 }
-.datetime-input-wrap {
-  position: relative;
-}
-.datetime-input-wrap > input {
-  padding-right: 38px;
-}
-.datetime-trigger {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #52637a;
-  display: inline-flex;
+.datetime-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: var(--space-3);
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: none;
 }
-.datetime-trigger:hover {
-  color: #52637a;
-  transform: translateY(-50%);
-  border-color: transparent;
-  background: transparent;
+.datetime-split > input {
+  min-width: 0;
 }
-.datetime-trigger:hover:not(:disabled):not(.label-remove-button),
-button.datetime-trigger:hover:not(:disabled):not(.label-remove-button),
-button.datetime-trigger:active:not(:disabled):not(.label-remove-button) {
-  transform: translateY(-50%);
-  border-color: transparent;
-  background: transparent;
+.datetime-split > input[type="time"] {
+  padding-right: var(--space-3);
 }
-.datetime-trigger:active {
-  transform: translateY(-50%);
-}
-.datetime-trigger svg {
-  width: 14px;
-  height: 14px;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 1.8;
+.field-grid .datetime-split,
+.detail-event-date-row .datetime-split {
+  width: 100%;
 }
 .flatpickr-calendar {
   font-family: var(--font-sans);
   color: var(--text);
-  font-size: 11.4px;
-  width: 238px;
-  min-width: 238px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-strong);
-  box-shadow: var(--shadow-soft);
-  padding-top: 2px;
+  font-size: 12.5px;
+  width: 316px;
+  min-width: 316px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 252, 0.98));
+  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.16), 0 8px 20px rgba(15, 118, 110, 0.08);
+  padding: 10px 10px 8px;
 }
 .flatpickr-calendar .flatpickr-months {
-  padding: 2px 6px 0;
+  padding: 4px 6px 10px;
 }
 .flatpickr-calendar .flatpickr-month {
-  height: 28px;
+  height: 40px;
 }
 .flatpickr-calendar .flatpickr-current-month {
-  padding-top: 2px;
+  padding-top: 6px;
 }
 .flatpickr-calendar .flatpickr-current-month .flatpickr-monthDropdown-months,
 .flatpickr-calendar .flatpickr-current-month .cur-month,
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
   color: var(--text);
-  font-size: var(--text-body);
+  font-size: 15px;
   font-weight: 700;
+  letter-spacing: 0.01em;
 }
 .flatpickr-calendar .flatpickr-prev-month,
 .flatpickr-calendar .flatpickr-next-month {
   color: #5d728d;
   fill: #5d728d;
+  padding: 8px;
+  border-radius: 10px;
+  transition: background-color 0.18s ease, color 0.18s ease, fill 0.18s ease;
 }
 .flatpickr-calendar .flatpickr-prev-month:hover,
 .flatpickr-calendar .flatpickr-next-month:hover {
-  color: #2f4f73;
-  fill: #2f4f73;
+  color: var(--accent-strong);
+  fill: var(--accent-strong);
+  background: rgba(15, 118, 110, 0.08);
 }
 .flatpickr-calendar .flatpickr-time input,
 .flatpickr-calendar .numInputWrapper span {
-  font-size: 11.4px;
+  font-size: 12.5px;
 }
 .flatpickr-calendar .flatpickr-innerContainer,
 .flatpickr-calendar .flatpickr-rContainer,
 .flatpickr-calendar .flatpickr-days,
 .flatpickr-calendar .flatpickr-weekdays {
-  width: 224px;
-  min-width: 224px;
-  max-width: 224px;
+  width: 294px;
+  min-width: 294px;
+  max-width: 294px;
   margin: 0 auto;
 }
 .flatpickr-calendar .flatpickr-day {
-  width: 32px;
-  flex: 0 0 32px;
-  max-width: 32px;
-  height: 32px;
-  line-height: 32px;
+  width: 38px;
+  flex: 0 0 38px;
+  max-width: 38px;
+  height: 38px;
+  line-height: 38px;
   color: var(--text);
-  border-radius: 8px;
-  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  margin: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 .flatpickr-calendar .flatpickr-day:hover {
-  background: var(--accent-soft);
+  background: rgba(15, 118, 110, 0.08);
   border-color: transparent;
 }
 .flatpickr-calendar .flatpickr-day.today {
-  border-color: rgba(15, 118, 110, 0.46);
+  border-color: rgba(15, 118, 110, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.08);
 }
 .flatpickr-calendar .flatpickr-day.selected,
 .flatpickr-calendar .flatpickr-day.startRange,
 .flatpickr-calendar .flatpickr-day.endRange {
-  background: #0f766e;
-  border-color: #0f766e;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.22);
+}
+.flatpickr-calendar .flatpickr-day.selected:hover,
+.flatpickr-calendar .flatpickr-day.startRange:hover,
+.flatpickr-calendar .flatpickr-day.endRange:hover {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   color: #fff;
 }
+.flatpickr-calendar .flatpickr-day.prevMonthDay,
+.flatpickr-calendar .flatpickr-day.nextMonthDay,
+.flatpickr-calendar .flatpickr-day.flatpickr-disabled {
+  color: #9aa7b7;
+}
 .flatpickr-calendar .flatpickr-weekday {
-  width: 32px;
-  flex: 0 0 32px;
-  max-width: 32px;
-  color: var(--muted);
-  font-size: 10.5px;
+  width: 38px;
+  flex: 0 0 38px;
+  max-width: 38px;
+  margin: 0 2px;
+  color: #738295;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .flatpickr-calendar .flatpickr-weekdaycontainer,
 .flatpickr-calendar .dayContainer {
-  width: 224px;
-  min-width: 224px;
-  max-width: 224px;
+  width: 294px;
+  min-width: 294px;
+  max-width: 294px;
 }
 .flatpickr-calendar .flatpickr-weekdays {
-  padding-bottom: 2px;
+  padding-bottom: 6px;
 }
 .flatpickr-calendar .flatpickr-weekdays .flatpickr-weekday:first-child {
-  color: #dc2626;
+  color: #c35656;
 }
 .flatpickr-calendar .flatpickr-weekdays .flatpickr-weekday:last-child {
-  color: #2563eb;
+  color: #4d79cc;
 }
 .flatpickr-calendar .dayContainer .flatpickr-day:nth-child(7n+1):not(.flatpickr-disabled):not(.selected):not(.startRange):not(.endRange):not(.inRange) {
-  color: #dc2626;
+  color: #c35656;
 }
 .flatpickr-calendar .dayContainer .flatpickr-day:nth-child(7n):not(.flatpickr-disabled):not(.selected):not(.startRange):not(.endRange):not(.inRange) {
-  color: #2563eb;
+  color: #4d79cc;
 }
 .flatpickr-calendar .flatpickr-rContainer {
-  padding-bottom: 2px;
+  padding-bottom: 6px;
 }
 .flatpickr-calendar .flatpickr-time {
-  height: 34px;
-  max-height: 34px;
-  border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.76);
+  height: 56px;
+  max-height: 56px;
+  margin-top: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(246, 250, 255, 0.92));
+  overflow: visible;
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper {
+  margin: 0 4px;
+  min-height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  overflow: visible;
 }
 .flatpickr-calendar .flatpickr-time input {
-  height: 32px;
-  line-height: 32px;
+  height: 34px;
+  line-height: 34px;
   color: var(--text);
+  font-weight: 700;
+  background: transparent;
 }
-.flatpickr-calendar .flatpickr-confirm {
-  padding: 4px 8px 6px;
-  border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.84);
-}
-.flatpickr-calendar .flatpickr-confirm .flatpickr-confirm-button {
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: #fff;
-  color: #334155;
-  font-family: var(--font-sans);
-  font-size: var(--text-label);
+.flatpickr-calendar .flatpickr-time .flatpickr-time-separator {
+  color: var(--muted);
   font-weight: 700;
 }
+.flatpickr-calendar .flatpickr-time .numInputWrapper:hover {
+  border-color: rgba(15, 118, 110, 0.24);
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper span {
+  border-left: 1px solid rgba(148, 163, 184, 0.18);
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowUp:after {
+  border-bottom-color: #64748b;
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowDown:after {
+  border-top-color: #64748b;
+}
+.flatpickr-calendar .flatpickr-confirm {
+  padding: 0 12px 12px;
+  border-top: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 250, 255, 0.96));
+}
+.flatpickr-calendar .flatpickr-confirm .flatpickr-confirm-button {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.22);
+}
 .flatpickr-calendar .flatpickr-confirm .flatpickr-confirm-button:hover {
-  border-color: #97abc4;
-  color: #274467;
+  background: linear-gradient(135deg, #11847b 0%, #0c6760 100%);
+  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.24);
 }
 .flatpickr-extra-actions {
   display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 4px 8px 6px;
-  border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.84);
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 250, 255, 0.96));
 }
-.flatpickr-extra-actions button {
-  min-height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: #fff;
-  color: #334155;
+.flatpickr-extra-actions button.flatpickr-action {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
   font-family: var(--font-sans);
-  font-size: var(--text-label);
+  font-size: 12px;
   font-weight: 700;
-  cursor: pointer;
 }
-.flatpickr-extra-actions button:hover {
-  border-color: #97abc4;
-  color: #274467;
+.flatpickr-extra-actions button.flatpickr-action-secondary {
+  margin-left: auto;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(255, 255, 255, 0.96);
+  color: #334155;
+}
+.flatpickr-extra-actions button.flatpickr-action-secondary:hover:not(:disabled) {
+  border-color: rgba(15, 118, 110, 0.24);
+  color: var(--accent-strong);
+  background: #fff;
+}
+.flatpickr-extra-actions button.flatpickr-action-danger {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  box-shadow: none;
+}
+.flatpickr-extra-actions button.flatpickr-action-danger:hover:not(:disabled),
+.flatpickr-extra-actions button.flatpickr-action-danger:active:not(:disabled) {
+  color: #9f1239;
+  background: transparent;
+  transform: none;
 }
 input,
 select,
@@ -1785,7 +1828,7 @@ button {
 input:not([type="checkbox"]):not([type="radio"]),
 select {
   width: 100%;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 var(--space-5);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -1803,6 +1846,14 @@ select:focus {
   border-color: rgba(15, 118, 110, 0.46);
   box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
 }
+input:not([type="checkbox"]):not([type="radio"]):disabled,
+select:disabled {
+  background: #eef3f8;
+  color: #98a6b6;
+  border-color: #d6e0ea;
+  box-shadow: none;
+  cursor: not-allowed;
+}
 input[type="checkbox"],
 input[type="radio"] {
   width: auto;
@@ -1815,7 +1866,7 @@ input[type="radio"] {
   flex: 0 0 auto;
 }
 button {
-  min-height: 34px;
+  min-height: 36px;
   padding: 0 var(--space-5);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -1827,6 +1878,11 @@ button {
   letter-spacing: 0.01em;
   box-shadow: none;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+button:focus-visible {
+  outline: none;
+  border-color: rgba(15, 118, 110, 0.46);
+  box-shadow: 0 0 0 4px var(--accent-ring);
 }
 button:hover:not(:disabled):not(.label-remove-button) {
   transform: translateY(-1px);
@@ -2187,8 +2243,8 @@ button:disabled {
   flex-wrap: wrap;
 }
 .detail-event-date-row .field {
-  flex: 0 1 240px;
-  max-width: 240px;
+  flex: 1 1 320px;
+  max-width: 360px;
 }
 .detail-event-date-actions {
   display: flex;
@@ -2743,6 +2799,9 @@ pre {
     max-width: none;
     flex: 1 1 100%;
   }
+  .datetime-split {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 </head>
@@ -2815,40 +2874,26 @@ pre {
           <div class="field-grid">
             <label class="field">
               <span>開始日</span>
-              <div class="datetime-input-wrap">
-                <input id="date_from" type="text" placeholder="年 / 月 / 日" inputmode="numeric" />
-                <button type="button" class="datetime-trigger" data-target="date_from" aria-label="開始日カレンダー">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2"></rect><line x1="3.5" y1="9" x2="20.5" y2="9"></line><line x1="8" y1="3.5" x2="8" y2="7"></line><line x1="16" y1="3.5" x2="16" y2="7"></line></svg>
-                </button>
-              </div>
+              <input id="date_from" type="date" />
             </label>
             <label class="field">
               <span>終了日</span>
-              <div class="datetime-input-wrap">
-                <input id="date_to" type="text" placeholder="年 / 月 / 日" inputmode="numeric" />
-                <button type="button" class="datetime-trigger" data-target="date_to" aria-label="終了日カレンダー">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2"></rect><line x1="3.5" y1="9" x2="20.5" y2="9"></line><line x1="8" y1="3.5" x2="8" y2="7"></line><line x1="16" y1="3.5" x2="16" y2="7"></line></svg>
-                </button>
-              </div>
+              <input id="date_to" type="date" />
             </label>
-            <label class="field">
-              <span>イベント開始日時</span>
-              <div class="datetime-input-wrap">
-                <input id="event_date_from" type="text" placeholder="年 / 月 / 日 --:--" inputmode="numeric" />
-                <button type="button" class="datetime-trigger" data-target="event_date_from" aria-label="イベント開始日時カレンダー">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2"></rect><line x1="3.5" y1="9" x2="20.5" y2="9"></line><line x1="8" y1="3.5" x2="8" y2="7"></line><line x1="16" y1="3.5" x2="16" y2="7"></line></svg>
-                </button>
+            <div class="field">
+              <span id="event_date_from_label">イベント開始日時</span>
+              <div class="datetime-split">
+                <input id="event_date_from_date" type="date" aria-label="イベント開始日時 日付" />
+                <input id="event_date_from_time" type="time" step="60" aria-label="イベント開始日時 時間" />
               </div>
-            </label>
-            <label class="field">
-              <span>イベント終了日時</span>
-              <div class="datetime-input-wrap">
-                <input id="event_date_to" type="text" placeholder="年 / 月 / 日 --:--" inputmode="numeric" />
-                <button type="button" class="datetime-trigger" data-target="event_date_to" aria-label="イベント終了日時カレンダー">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2"></rect><line x1="3.5" y1="9" x2="20.5" y2="9"></line><line x1="8" y1="3.5" x2="8" y2="7"></line><line x1="16" y1="3.5" x2="16" y2="7"></line></svg>
-                </button>
+            </div>
+            <div class="field">
+              <span id="event_date_to_label">イベント終了日時</span>
+              <div class="datetime-split">
+                <input id="event_date_to_date" type="date" aria-label="イベント終了日時 日付" />
+                <input id="event_date_to_time" type="time" step="60" aria-label="イベント終了日時 時間" />
               </div>
-            </label>
+            </div>
             <label class="field">
               <span>source</span>
               <select id="source_filter">
@@ -2940,25 +2985,21 @@ pre {
             <span id="detail_keyword_match_count" class="match-counter hidden"></span>
             <button id="detail_keyword_clear" class="secondary-action" disabled>検索をクリア</button>
           </div>
-          <div class="detail-event-date-row">
-            <label class="field">
-              <span>イベント開始日時</span>
-              <div class="datetime-input-wrap">
-                <input id="detail_event_date_from" type="text" placeholder="年 / 月 / 日 --:--" inputmode="numeric" />
-                <button type="button" class="datetime-trigger" data-target="detail_event_date_from" aria-label="詳細イベント開始日時カレンダー">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2"></rect><line x1="3.5" y1="9" x2="20.5" y2="9"></line><line x1="8" y1="3.5" x2="8" y2="7"></line><line x1="16" y1="3.5" x2="16" y2="7"></line></svg>
-                </button>
+            <div class="detail-event-date-row">
+            <div class="field">
+              <span id="detail_event_date_from_label">イベント開始日時</span>
+              <div class="datetime-split">
+                <input id="detail_event_date_from_date" type="date" aria-label="詳細イベント開始日時 日付" />
+                <input id="detail_event_date_from_time" type="time" step="60" aria-label="詳細イベント開始日時 時間" />
               </div>
-            </label>
-            <label class="field">
-              <span>イベント終了日時</span>
-              <div class="datetime-input-wrap">
-                <input id="detail_event_date_to" type="text" placeholder="年 / 月 / 日 --:--" inputmode="numeric" />
-                <button type="button" class="datetime-trigger" data-target="detail_event_date_to" aria-label="詳細イベント終了日時カレンダー">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2"></rect><line x1="3.5" y1="9" x2="20.5" y2="9"></line><line x1="8" y1="3.5" x2="8" y2="7"></line><line x1="16" y1="3.5" x2="16" y2="7"></line></svg>
-                </button>
+            </div>
+            <div class="field">
+              <span id="detail_event_date_to_label">イベント終了日時</span>
+              <div class="datetime-split">
+                <input id="detail_event_date_to_date" type="date" aria-label="詳細イベント終了日時 日付" />
+                <input id="detail_event_date_to_time" type="time" step="60" aria-label="詳細イベント終了日時 時間" />
               </div>
-            </label>
+            </div>
             <div class="detail-event-date-actions">
               <button id="clear_detail_event_date" class="secondary-action">日時クリア</button>
             </div>
@@ -3095,10 +3136,6 @@ pre {
     </div>
   </div>
 </div>
-<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css\" />
-<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/flatpickr/dist/plugins/confirmDate/confirmDate.css\" />
-<script src=\"https://cdn.jsdelivr.net/npm/flatpickr\"></script>
-<script src=\"https://cdn.jsdelivr.net/npm/flatpickr/dist/plugins/confirmDate/confirmDate.js\"></script>
 <script>
 const state = {
   sessions: [],
@@ -3156,6 +3193,8 @@ const I18N = {
     'filter.dateTo': '終了日',
     'filter.eventDateFrom': 'イベント開始日時',
     'filter.eventDateTo': 'イベント終了日時',
+    'common.date': '日付',
+    'common.time': '時間',
     'filter.source': 'source',
     'filter.sessionLabel': 'セッションラベル',
     'filter.eventLabel': 'イベントラベル',
@@ -3276,6 +3315,9 @@ const I18N = {
     'picker.noLabels': 'ラベルがありません。先にラベル管理から作成してください。',
     'picker.removeLabel': 'ラベル解除',
     'picker.addLabel': 'ラベル追加',
+    'calendar.clear': '削除',
+    'calendar.today': '今日',
+    'calendar.confirm': 'OK',
     'copy.copied': 'コピーしました',
     'copy.displayedCount': '{count}件コピー',
     'copy.selectedCount': '{count}件コピー',
@@ -3310,6 +3352,8 @@ const I18N = {
     'filter.dateTo': 'End date',
     'filter.eventDateFrom': 'Event start date/time',
     'filter.eventDateTo': 'Event end date/time',
+    'common.date': 'Date',
+    'common.time': 'Time',
     'filter.source': 'Source',
     'filter.sessionLabel': 'Session label',
     'filter.eventLabel': 'Event label',
@@ -3430,6 +3474,9 @@ const I18N = {
     'picker.noLabels': 'No labels exist yet. Create one in Label Manager first.',
     'picker.removeLabel': 'Remove label',
     'picker.addLabel': 'Add label',
+    'calendar.clear': 'Clear',
+    'calendar.today': 'Today',
+    'calendar.confirm': 'OK',
     'copy.copied': 'Copied',
     'copy.displayedCount': 'Copied {count}',
     'copy.selectedCount': 'Copied {count}',
@@ -3464,6 +3511,8 @@ const I18N = {
     'filter.dateTo': '结束日期',
     'filter.eventDateFrom': '事件开始日期时间',
     'filter.eventDateTo': '事件结束日期时间',
+    'common.date': '日期',
+    'common.time': '时间',
     'filter.source': '来源',
     'filter.sessionLabel': '会话标签',
     'filter.eventLabel': '事件标签',
@@ -3584,6 +3633,9 @@ const I18N = {
     'picker.noLabels': '还没有标签。请先在标签管理中创建标签。',
     'picker.removeLabel': '移除标签',
     'picker.addLabel': '添加标签',
+    'calendar.clear': '删除',
+    'calendar.today': '今天',
+    'calendar.confirm': '确定',
     'copy.copied': '已复制',
     'copy.displayedCount': '已复制 {count} 项',
     'copy.selectedCount': '已复制 {count} 项',
@@ -3616,6 +3668,8 @@ I18N['zh-Hant'] = {
   'filter.dateTo': '結束日期',
   'filter.eventDateFrom': '事件開始日期時間',
   'filter.eventDateTo': '事件結束日期時間',
+  'common.date': '日期',
+  'common.time': '時間',
   'filter.source': '來源',
   'filter.eventLabel': '事件標籤',
   'filter.sort': '排序',
@@ -3717,6 +3771,9 @@ I18N['zh-Hant'] = {
   'picker.noLabels': '尚未有標籤。請先在標籤管理中建立標籤。',
   'picker.removeLabel': '移除標籤',
   'picker.addLabel': '新增標籤',
+  'calendar.clear': '刪除',
+  'calendar.today': '今天',
+  'calendar.confirm': '確定',
   'copy.copied': '已複製',
   'copy.displayedCount': '已複製 {count} 項',
   'copy.selectedCount': '已複製 {count} 項',
@@ -3772,6 +3829,18 @@ function setFieldLabel(inputId, value){
   }
 }
 
+function setInputAriaLabel(id, value){
+  const input = document.getElementById(id);
+  if(input){
+    input.setAttribute('aria-label', value);
+  }
+}
+
+function setDateTimePairAria(dateId, timeId, label){
+  setInputAriaLabel(dateId, `${label} ${t('common.date')}`);
+  setInputAriaLabel(timeId, `${label} ${t('common.time')}`);
+}
+
 function setToggleLabel(inputId, value){
   const input = document.getElementById(inputId);
   const label = input ? input.closest('label') : null;
@@ -3814,8 +3883,12 @@ function applyMainLanguage(){
   setText('.toolbar-section:nth-of-type(2) .toolbar-section-copy', t('filter.copy'));
   setFieldLabel('date_from', t('filter.dateFrom'));
   setFieldLabel('date_to', t('filter.dateTo'));
-  setFieldLabel('event_date_from', t('filter.eventDateFrom'));
-  setFieldLabel('event_date_to', t('filter.eventDateTo'));
+  setTextById('event_date_from_label', t('filter.eventDateFrom'));
+  setTextById('event_date_to_label', t('filter.eventDateTo'));
+  setInputAriaLabel('date_from', t('filter.dateFrom'));
+  setInputAriaLabel('date_to', t('filter.dateTo'));
+  setDateTimePairAria('event_date_from_date', 'event_date_from_time', t('filter.eventDateFrom'));
+  setDateTimePairAria('event_date_to_date', 'event_date_to_time', t('filter.eventDateTo'));
   setFieldLabel('source_filter', t('filter.source'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
@@ -3852,8 +3925,10 @@ function applyMainLanguage(){
   setTextById('detail_keyword_prev', t('detail.prev'));
   setTextById('detail_keyword_next', t('detail.next'));
   setTextById('detail_keyword_clear', t('detail.searchClear'));
-  setFieldLabel('detail_event_date_from', t('detail.eventDateFrom'));
-  setFieldLabel('detail_event_date_to', t('detail.eventDateTo'));
+  setTextById('detail_event_date_from_label', t('detail.eventDateFrom'));
+  setTextById('detail_event_date_to_label', t('detail.eventDateTo'));
+  setDateTimePairAria('detail_event_date_from_date', 'detail_event_date_from_time', t('detail.eventDateFrom'));
+  setDateTimePairAria('detail_event_date_to_date', 'detail_event_date_to_time', t('detail.eventDateTo'));
   setTextById('clear_detail_event_date', t('detail.eventDateClear'));
   setText('.detail-toolbar-row.range .detail-group-title', t('detail.range'));
   setTextById('clear_message_range_selection', t('detail.rangeClear'));
@@ -3893,8 +3968,7 @@ function applyMainLanguage(){
   setText('.shortcut-copy', t('shortcut.copy'));
   setTextById('close_shortcuts', t('shortcut.close'));
   populateLabelControls();
-  initDatePickers();
-  initDateTimePickers();
+  refreshDateTimeInputPairStates();
   updateFilterVisibility();
   updateDetailActionsVisibility();
   updateDetailMetaVisibility();
@@ -3950,8 +4024,6 @@ let saveFiltersFrame = 0;
 let deferredDetailSyncTimer = 0;
 let labelManagerWindow = null;
 let labelPickerHandler = null;
-let datePickers = [];
-let dateTimePickers = [];
 let filtersVisible = true;
 let detailActionsVisible = true;
 let detailMetaVisible = false;
@@ -4538,6 +4610,76 @@ function normalizeDatetimeInputDisplay(raw){
   return iso ? formatDateTimeInputFromIso(iso) : '';
 }
 
+function parseTimeInputToValue(raw){
+  if(typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if(!trimmed) return '';
+  const canonical = trimmed
+    .replace(/[：]/g, ':')
+    .replace(/\s+/g, '');
+  const m = canonical.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m){
+    return '';
+  }
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if(!Number.isFinite(hour) || hour < 0 || hour > 23) return '';
+  if(!Number.isFinite(minute) || minute < 0 || minute > 59) return '';
+  return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+function buildDateTimeIsoFromParts(dateRaw, timeRaw, boundary){
+  const dateIso = parseDateInputToIso(dateRaw);
+  if(!dateIso){
+    return '';
+  }
+  const timeValue = parseTimeInputToValue(timeRaw);
+  const fallbackTime = boundary === 'end' ? '23:59' : '00:00';
+  return `${dateIso}T${timeValue || fallbackTime}`;
+}
+
+function extractTimeInputFromIso(isoValue){
+  const iso = parseDateTimeInputToIso(isoValue);
+  if(!iso) return '';
+  const m = iso.match(/T(\d{2}):(\d{2})$/);
+  if(!m) return '';
+  return `${m[1]}:${m[2]}`;
+}
+
+function setDateTimePairFromIso(dateId, timeId, isoValue){
+  const dateInput = document.getElementById(dateId);
+  const timeInput = document.getElementById(timeId);
+  if(dateInput){
+    dateInput.value = parseDateInputToIso(isoValue);
+  }
+  if(timeInput){
+    timeInput.value = extractTimeInputFromIso(isoValue);
+  }
+  syncDateTimeInputPairState(dateId, timeId);
+}
+
+function syncDateTimeInputPairState(dateId, timeId){
+  const dateInput = document.getElementById(dateId);
+  const timeInput = document.getElementById(timeId);
+  if(!dateInput || !timeInput){
+    return;
+  }
+  const hasDate = Boolean(parseDateInputToIso(dateInput.value));
+  if(!hasDate){
+    timeInput.value = '';
+  } else if(timeInput.value){
+    timeInput.value = parseTimeInputToValue(timeInput.value);
+  }
+  timeInput.disabled = !hasDate;
+}
+
+function refreshDateTimeInputPairStates(){
+  syncDateTimeInputPairState('event_date_from_date', 'event_date_from_time');
+  syncDateTimeInputPairState('event_date_to_date', 'event_date_to_time');
+  syncDateTimeInputPairState('detail_event_date_from_date', 'detail_event_date_from_time');
+  syncDateTimeInputPairState('detail_event_date_to_date', 'detail_event_date_to_time');
+}
+
 const DATETIME_INPUT_SKELETON = '0000 / 00 / 00 --:--';
 const DATETIME_INPUT_SEGMENTS = [
   { start: 0, end: 4, fill: '0' },
@@ -4814,166 +4956,6 @@ function setupDateSegmentInput(input){
       input.dispatchEvent(new Event('change', { bubbles: true }));
     }, 0);
   });
-}
-
-function destroyDateTimePickers(){
-  dateTimePickers.forEach((picker) => {
-    try {
-      picker.destroy();
-    } catch (e) {
-      // Ignore cleanup errors.
-    }
-  });
-  dateTimePickers = [];
-}
-
-function destroyDatePickers(){
-  datePickers.forEach((picker) => {
-    try {
-      picker.destroy();
-    } catch (e) {
-      // Ignore cleanup errors.
-    }
-  });
-  datePickers = [];
-}
-
-function bindCalendarTriggerButtons(){
-  document.querySelectorAll('.datetime-trigger').forEach((button) => {
-    const target = button.getAttribute('data-target') || '';
-    button.onclick = () => {
-      const allPickers = datePickers.concat(dateTimePickers);
-      const picker = allPickers.find((item) => item && item.input && item.input.id === target);
-      if(picker){
-        picker.open();
-      }
-    };
-  });
-}
-
-function initDatePickers(){
-  destroyDatePickers();
-  if(typeof flatpickr !== 'function'){
-    return;
-  }
-  const attachPicker = (inputId, onApply) => {
-    const input = document.getElementById(inputId);
-    if(!input) return;
-    setupDateSegmentInput(input);
-    const normalized = normalizeDateInputDisplay(input.value);
-    if(input.value !== normalized){
-      input.value = normalized;
-    }
-    let beforeOpenValue = input.value;
-    const picker = flatpickr(input, {
-      enableTime: false,
-      dateFormat: 'Y / m / d',
-      allowInput: true,
-      clickOpens: false,
-      onOpen: () => {
-        beforeOpenValue = normalizeDateInputDisplay(input.value);
-      },
-      onClose: () => {
-        const currentValue = normalizeDateInputDisplay(input.value);
-        if(input.value !== currentValue){
-          input.value = currentValue;
-        }
-        if(currentValue !== beforeOpenValue){
-          onApply();
-        }
-      },
-    });
-    datePickers.push(picker);
-  };
-  attachPicker('date_from', applyFilter);
-  attachPicker('date_to', applyFilter);
-  bindCalendarTriggerButtons();
-}
-
-function initDateTimePickers(){
-  destroyDateTimePickers();
-  if(typeof flatpickr !== 'function'){
-    return;
-  }
-  const confirmPluginFactory = window.confirmDatePlugin;
-  const createPlugins = () => {
-    if(typeof confirmPluginFactory !== 'function'){
-      return [];
-    }
-    return [confirmPluginFactory({ confirmText: 'OK', showAlways: true, theme: 'light' })];
-  };
-  const attachPicker = (inputId, onApply) => {
-    const input = document.getElementById(inputId);
-    if(!input) return;
-    setupDateTimeSegmentInput(input);
-    const normalized = normalizeDatetimeInputDisplay(input.value);
-    if(input.value !== normalized){
-      input.value = normalized;
-    }
-    let beforeOpenValue = input.value;
-    const picker = flatpickr(input, {
-      enableTime: true,
-      time_24hr: true,
-      enableSeconds: false,
-      minuteIncrement: 1,
-      dateFormat: 'Y / m / d H:i',
-      allowInput: true,
-      clickOpens: false,
-      plugins: createPlugins(),
-      onOpen: () => {
-        beforeOpenValue = normalizeDatetimeInputDisplay(input.value);
-      },
-      onReady: (_selectedDates, _dateStr, instance) => {
-        const calendar = instance.calendarContainer;
-        if(!calendar) return;
-        const actions = document.createElement('div');
-        actions.className = 'flatpickr-extra-actions';
-        const clearButton = document.createElement('button');
-        clearButton.type = 'button';
-        clearButton.textContent = '削除';
-        clearButton.addEventListener('click', () => {
-          instance.clear();
-          instance.close();
-        });
-        const todayButton = document.createElement('button');
-        todayButton.type = 'button';
-        todayButton.textContent = '今日';
-        todayButton.addEventListener('click', () => {
-          instance.setDate(new Date(), false);
-          instance.close();
-        });
-        actions.appendChild(clearButton);
-        actions.appendChild(todayButton);
-        const confirmRow = calendar.querySelector('.flatpickr-confirm');
-        if(confirmRow && confirmRow.parentNode){
-          confirmRow.parentNode.insertBefore(actions, confirmRow);
-        } else {
-          calendar.appendChild(actions);
-        }
-      },
-      onClose: () => {
-        const currentValue = normalizeDatetimeInputDisplay(input.value);
-        if(input.value !== currentValue){
-          input.value = currentValue;
-        }
-        if(currentValue !== beforeOpenValue){
-          onApply();
-        }
-      },
-    });
-    dateTimePickers.push(picker);
-  };
-  attachPicker('event_date_from', applyFilter);
-  attachPicker('event_date_to', applyFilter);
-  attachPicker('detail_event_date_from', () => {
-    saveFilters();
-    renderActiveSession();
-  });
-  attachPicker('detail_event_date_to', () => {
-    saveFilters();
-    renderActiveSession();
-  });
-  bindCalendarTriggerButtons();
 }
 
 function parseOptionalDatetimeStart(raw){
@@ -5508,8 +5490,10 @@ function hasDetailFilter(){
     ((state.selectedEventIds && state.selectedEventIds.size) || 0) > 0 ||
     state.isMessageRangeSelectionMode ||
     state.selectedMessageRangeEventId ||
-    document.getElementById('detail_event_date_from').value ||
-    document.getElementById('detail_event_date_to').value
+    document.getElementById('detail_event_date_from_date').value ||
+    document.getElementById('detail_event_date_from_time').value ||
+    document.getElementById('detail_event_date_to_date').value ||
+    document.getElementById('detail_event_date_to_time').value
   );
 }
 
@@ -5526,8 +5510,10 @@ function hasListFilter(){
     document.getElementById('cwd_q').value.trim() ||
     document.getElementById('date_from').value ||
     document.getElementById('date_to').value ||
-    document.getElementById('event_date_from').value ||
-    document.getElementById('event_date_to').value ||
+    document.getElementById('event_date_from_date').value ||
+    document.getElementById('event_date_from_time').value ||
+    document.getElementById('event_date_to_date').value ||
+    document.getElementById('event_date_to_time').value ||
     document.getElementById('q').value.trim() ||
     normalizeSourceFilter(document.getElementById('source_filter').value || 'all') !== 'all' ||
     getSelectedSessionLabelFilter() ||
@@ -5669,22 +5655,37 @@ async function loadSessions(options){
 function saveFilters(){
   const dateFromIso = parseDateInputToIso(document.getElementById('date_from').value);
   const dateToIso = parseDateInputToIso(document.getElementById('date_to').value);
-  const eventDateFromIso = parseDateTimeInputToIso(document.getElementById('event_date_from').value);
-  const eventDateToIso = parseDateTimeInputToIso(document.getElementById('event_date_to').value);
-  const detailEventDateFromIso = parseDateTimeInputToIso(document.getElementById('detail_event_date_from').value);
-  const detailEventDateToIso = parseDateTimeInputToIso(document.getElementById('detail_event_date_to').value);
-  document.getElementById('date_from').value = dateFromIso ? formatDateInputFromIso(dateFromIso) : '';
-  document.getElementById('date_to').value = dateToIso ? formatDateInputFromIso(dateToIso) : '';
-  document.getElementById('event_date_from').value = eventDateFromIso ? formatDateTimeInputFromIso(eventDateFromIso) : '';
-  document.getElementById('event_date_to').value = eventDateToIso ? formatDateTimeInputFromIso(eventDateToIso) : '';
-  document.getElementById('detail_event_date_from').value = detailEventDateFromIso ? formatDateTimeInputFromIso(detailEventDateFromIso) : '';
-  document.getElementById('detail_event_date_to').value = detailEventDateToIso ? formatDateTimeInputFromIso(detailEventDateToIso) : '';
+  const eventDateFromDate = parseDateInputToIso(document.getElementById('event_date_from_date').value);
+  const eventDateFromTime = parseTimeInputToValue(document.getElementById('event_date_from_time').value);
+  const eventDateToDate = parseDateInputToIso(document.getElementById('event_date_to_date').value);
+  const eventDateToTime = parseTimeInputToValue(document.getElementById('event_date_to_time').value);
+  const detailEventDateFromDate = parseDateInputToIso(document.getElementById('detail_event_date_from_date').value);
+  const detailEventDateFromTime = parseTimeInputToValue(document.getElementById('detail_event_date_from_time').value);
+  const detailEventDateToDate = parseDateInputToIso(document.getElementById('detail_event_date_to_date').value);
+  const detailEventDateToTime = parseTimeInputToValue(document.getElementById('detail_event_date_to_time').value);
+  const eventDateFromIso = buildDateTimeIsoFromParts(eventDateFromDate, eventDateFromTime, 'start');
+  const eventDateToIso = buildDateTimeIsoFromParts(eventDateToDate, eventDateToTime, 'end');
+  const detailEventDateFromIso = buildDateTimeIsoFromParts(detailEventDateFromDate, detailEventDateFromTime, 'start');
+  const detailEventDateToIso = buildDateTimeIsoFromParts(detailEventDateToDate, detailEventDateToTime, 'end');
+  document.getElementById('date_from').value = dateFromIso;
+  document.getElementById('date_to').value = dateToIso;
+  document.getElementById('event_date_from_date').value = eventDateFromDate;
+  document.getElementById('event_date_from_time').value = eventDateFromTime;
+  document.getElementById('event_date_to_date').value = eventDateToDate;
+  document.getElementById('event_date_to_time').value = eventDateToTime;
+  document.getElementById('detail_event_date_from_date').value = detailEventDateFromDate;
+  document.getElementById('detail_event_date_from_time').value = detailEventDateFromTime;
+  document.getElementById('detail_event_date_to_date').value = detailEventDateToDate;
+  document.getElementById('detail_event_date_to_time').value = detailEventDateToTime;
+  refreshDateTimeInputPairStates();
   const payload = {
     cwd_q: document.getElementById('cwd_q').value,
     date_from: dateFromIso,
     date_to: dateToIso,
-    event_date_from: eventDateFromIso,
-    event_date_to: eventDateToIso,
+    event_date_from_date: eventDateFromDate,
+    event_date_from_time: eventDateFromTime,
+    event_date_to_date: eventDateToDate,
+    event_date_to_time: eventDateToTime,
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
@@ -5692,8 +5693,10 @@ function saveFilters(){
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
     detail_event_label_filter: getSelectedDetailEventLabelFilter(),
-    detail_event_date_from: detailEventDateFromIso,
-    detail_event_date_to: detailEventDateToIso,
+    detail_event_date_from_date: detailEventDateFromDate,
+    detail_event_date_from_time: detailEventDateFromTime,
+    detail_event_date_to_date: detailEventDateToDate,
+    detail_event_date_to_time: detailEventDateToTime,
     filters_visible: filtersVisible,
     detail_actions_visible: detailActionsVisible,
     left_pane_visible: leftPaneVisible,
@@ -5716,10 +5719,20 @@ function restoreFilters(){
   try {
     const data = JSON.parse(raw);
     if(typeof data.cwd_q === 'string') document.getElementById('cwd_q').value = data.cwd_q;
-    if(typeof data.date_from === 'string') document.getElementById('date_from').value = formatDateInputFromIso(data.date_from);
-    if(typeof data.date_to === 'string') document.getElementById('date_to').value = formatDateInputFromIso(data.date_to);
-    if(typeof data.event_date_from === 'string') document.getElementById('event_date_from').value = formatDateTimeInputFromIso(data.event_date_from);
-    if(typeof data.event_date_to === 'string') document.getElementById('event_date_to').value = formatDateTimeInputFromIso(data.event_date_to);
+    if(typeof data.date_from === 'string') document.getElementById('date_from').value = parseDateInputToIso(data.date_from);
+    if(typeof data.date_to === 'string') document.getElementById('date_to').value = parseDateInputToIso(data.date_to);
+    if(typeof data.event_date_from_date === 'string' || typeof data.event_date_from_time === 'string'){
+      document.getElementById('event_date_from_date').value = parseDateInputToIso(data.event_date_from_date);
+      document.getElementById('event_date_from_time').value = parseTimeInputToValue(data.event_date_from_time);
+    } else if(typeof data.event_date_from === 'string'){
+      setDateTimePairFromIso('event_date_from_date', 'event_date_from_time', data.event_date_from);
+    }
+    if(typeof data.event_date_to_date === 'string' || typeof data.event_date_to_time === 'string'){
+      document.getElementById('event_date_to_date').value = parseDateInputToIso(data.event_date_to_date);
+      document.getElementById('event_date_to_time').value = parseTimeInputToValue(data.event_date_to_time);
+    } else if(typeof data.event_date_to === 'string'){
+      setDateTimePairFromIso('event_date_to_date', 'event_date_to_time', data.event_date_to);
+    }
     if(typeof data.q === 'string') document.getElementById('q').value = data.q;
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
@@ -5728,8 +5741,19 @@ function restoreFilters(){
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
-    if(typeof data.detail_event_date_from === 'string') document.getElementById('detail_event_date_from').value = formatDateTimeInputFromIso(data.detail_event_date_from);
-    if(typeof data.detail_event_date_to === 'string') document.getElementById('detail_event_date_to').value = formatDateTimeInputFromIso(data.detail_event_date_to);
+    if(typeof data.detail_event_date_from_date === 'string' || typeof data.detail_event_date_from_time === 'string'){
+      document.getElementById('detail_event_date_from_date').value = parseDateInputToIso(data.detail_event_date_from_date);
+      document.getElementById('detail_event_date_from_time').value = parseTimeInputToValue(data.detail_event_date_from_time);
+    } else if(typeof data.detail_event_date_from === 'string'){
+      setDateTimePairFromIso('detail_event_date_from_date', 'detail_event_date_from_time', data.detail_event_date_from);
+    }
+    if(typeof data.detail_event_date_to_date === 'string' || typeof data.detail_event_date_to_time === 'string'){
+      document.getElementById('detail_event_date_to_date').value = parseDateInputToIso(data.detail_event_date_to_date);
+      document.getElementById('detail_event_date_to_time').value = parseTimeInputToValue(data.detail_event_date_to_time);
+    } else if(typeof data.detail_event_date_to === 'string'){
+      setDateTimePairFromIso('detail_event_date_to_date', 'detail_event_date_to_time', data.detail_event_date_to);
+    }
+    refreshDateTimeInputPairStates();
     if(typeof data.filters_visible === 'boolean') filtersVisible = data.filters_visible;
     if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
     if(typeof data.left_pane_visible === 'boolean') leftPaneVisible = data.left_pane_visible;
@@ -5743,8 +5767,10 @@ function clearFilters(){
   document.getElementById('cwd_q').value = '';
   document.getElementById('date_from').value = '';
   document.getElementById('date_to').value = '';
-  document.getElementById('event_date_from').value = '';
-  document.getElementById('event_date_to').value = '';
+  document.getElementById('event_date_from_date').value = '';
+  document.getElementById('event_date_from_time').value = '';
+  document.getElementById('event_date_to_date').value = '';
+  document.getElementById('event_date_to_time').value = '';
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
@@ -5752,8 +5778,11 @@ function clearFilters(){
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
   document.getElementById('detail_event_label_filter').value = '';
-  document.getElementById('detail_event_date_from').value = '';
-  document.getElementById('detail_event_date_to').value = '';
+  document.getElementById('detail_event_date_from_date').value = '';
+  document.getElementById('detail_event_date_from_time').value = '';
+  document.getElementById('detail_event_date_to_date').value = '';
+  document.getElementById('detail_event_date_to_time').value = '';
+  refreshDateTimeInputPairStates();
   try {
     localStorage.removeItem(FILTER_STORAGE_KEY);
   } catch (e) {
@@ -5773,8 +5802,16 @@ function applyFilter(){
   const toRaw = document.getElementById('date_to').value;
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
-  const evFromRaw = document.getElementById('event_date_from').value;
-  const evToRaw = document.getElementById('event_date_to').value;
+  const evFromRaw = buildDateTimeIsoFromParts(
+    document.getElementById('event_date_from_date').value,
+    document.getElementById('event_date_from_time').value,
+    'start'
+  );
+  const evToRaw = buildDateTimeIsoFromParts(
+    document.getElementById('event_date_to_date').value,
+    document.getElementById('event_date_to_time').value,
+    'end'
+  );
   const evFromTs = parseOptionalDatetimeStart(evFromRaw);
   const evToTs = parseOptionalDatetimeEnd(evToRaw);
   state.filtered = state.sessions.filter(s => {
@@ -5929,8 +5966,16 @@ function getDisplayEvents(){
   if(detailKeywordFilterTerm !== ''){
     events = events.filter(ev => containsLiteralKeyword(getEventBodyText(ev), detailKeywordFilterTerm));
   }
-  const detailEvFromRaw = document.getElementById('detail_event_date_from').value;
-  const detailEvToRaw = document.getElementById('detail_event_date_to').value;
+  const detailEvFromRaw = buildDateTimeIsoFromParts(
+    document.getElementById('detail_event_date_from_date').value,
+    document.getElementById('detail_event_date_from_time').value,
+    'start'
+  );
+  const detailEvToRaw = buildDateTimeIsoFromParts(
+    document.getElementById('detail_event_date_to_date').value,
+    document.getElementById('detail_event_date_to_time').value,
+    'end'
+  );
   const detailEvFromTs = parseOptionalDatetimeStart(detailEvFromRaw);
   const detailEvToTs = parseOptionalDatetimeEnd(detailEvToRaw);
   if(detailEvFromTs !== null || detailEvToTs !== null){
@@ -6187,8 +6232,11 @@ function clearDetailFilters(){
   if(detailKeywordInput){
     detailKeywordInput.value = '';
   }
-  document.getElementById('detail_event_date_from').value = '';
-  document.getElementById('detail_event_date_to').value = '';
+  document.getElementById('detail_event_date_from_date').value = '';
+  document.getElementById('detail_event_date_from_time').value = '';
+  document.getElementById('detail_event_date_to_date').value = '';
+  document.getElementById('detail_event_date_to_time').value = '';
+  refreshDateTimeInputPairStates();
   resetDetailKeywordState();
   state.isEventSelectionMode = false;
   clearSelectedEventIds();
@@ -6573,11 +6621,20 @@ function safeBindById(id, eventName, handler){
   node.addEventListener(eventName, handler);
 }
 
+function bindDateTimePairChange(dateId, timeId, handler){
+  const run = () => {
+    syncDateTimeInputPairState(dateId, timeId);
+    handler();
+  };
+  safeBindById(dateId, 'change', run);
+  safeBindById(timeId, 'change', run);
+}
+
 safeBindById('cwd_q', 'input', applyFilter);
 safeBindById('date_from', 'change', applyFilter);
 safeBindById('date_to', 'change', applyFilter);
-safeBindById('event_date_from', 'change', applyFilter);
-safeBindById('event_date_to', 'change', applyFilter);
+bindDateTimePairChange('event_date_from_date', 'event_date_from_time', applyFilter);
+bindDateTimePairChange('event_date_to_date', 'event_date_to_time', applyFilter);
 safeBindById('q', 'input', scheduleLoadSessions);
 safeBindById('mode', 'change', scheduleLoadSessions);
 safeBindById('source_filter', 'change', applyFilter);
@@ -6593,17 +6650,20 @@ safeBindById('detail_event_label_filter', 'change', () => {
   saveFilters();
   renderActiveSession();
 });
-safeBindById('detail_event_date_from', 'change', () => {
+bindDateTimePairChange('detail_event_date_from_date', 'detail_event_date_from_time', () => {
   saveFilters();
   renderActiveSession();
 });
-safeBindById('detail_event_date_to', 'change', () => {
+bindDateTimePairChange('detail_event_date_to_date', 'detail_event_date_to_time', () => {
   saveFilters();
   renderActiveSession();
 });
 safeBindById('clear_detail_event_date', 'click', () => {
-  document.getElementById('detail_event_date_from').value = '';
-  document.getElementById('detail_event_date_to').value = '';
+  document.getElementById('detail_event_date_from_date').value = '';
+  document.getElementById('detail_event_date_from_time').value = '';
+  document.getElementById('detail_event_date_to_date').value = '';
+  document.getElementById('detail_event_date_to_time').value = '';
+  refreshDateTimeInputPairStates();
   saveFilters();
   renderActiveSession();
 });
