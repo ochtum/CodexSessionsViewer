@@ -1928,6 +1928,12 @@ button:disabled {
   background: rgba(255, 255, 255, 0.96);
   color: #334155;
 }
+#clear_detail_event_date:disabled {
+  background: rgba(255, 255, 255, 0.96);
+  color: #334155;
+  border-color: var(--line-strong);
+  opacity: 1;
+}
 .utility-action,
 .secondary-button,
 #toggle_filters,
@@ -4709,13 +4715,16 @@ function syncDateTimeInputPairState(dateId, timeId){
   if(!dateInput || !timeInput){
     return;
   }
+  const requiresActiveSession = dateId.startsWith('detail_');
+  const hasControlAccess = !requiresActiveSession || !!state.activeSession;
   const hasDate = Boolean(parseDateInputToIso(dateInput.value));
   if(!hasDate){
     timeInput.value = '';
   } else if(timeInput.value){
     timeInput.value = parseTimeInputToValue(timeInput.value);
   }
-  timeInput.disabled = !hasDate;
+  dateInput.disabled = !hasControlAccess;
+  timeInput.disabled = !hasControlAccess || !hasDate;
 }
 
 function refreshDateTimeInputPairStates(){
@@ -5246,6 +5255,12 @@ function updateDetailDisplayControlsState(){
   if(detailEventLabelFilter){
     detailEventLabelFilter.disabled = !hasActiveSession;
   }
+  syncDateTimeInputPairState('detail_event_date_from_date', 'detail_event_date_from_time');
+  syncDateTimeInputPairState('detail_event_date_to_date', 'detail_event_date_to_time');
+  const clearDetailEventDateButton = document.getElementById('clear_detail_event_date');
+  if(clearDetailEventDateButton){
+    clearDetailEventDateButton.disabled = !hasActiveSession || !hasDetailEventDateFilter();
+  }
 }
 
 function resetDetailKeywordState(){
@@ -5542,6 +5557,15 @@ function hasDetailFilter(){
   );
 }
 
+function hasDetailEventDateFilter(){
+  return Boolean(
+    document.getElementById('detail_event_date_from_date').value ||
+    document.getElementById('detail_event_date_from_time').value ||
+    document.getElementById('detail_event_date_to_date').value ||
+    document.getElementById('detail_event_date_to_time').value
+  );
+}
+
 function updateClearDetailButtonState(){
   const button = document.getElementById('clear_detail');
   if(!button){
@@ -5738,10 +5762,6 @@ function saveFilters(){
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
     detail_event_label_filter: getSelectedDetailEventLabelFilter(),
-    detail_event_date_from_date: detailEventDateFromDate,
-    detail_event_date_from_time: detailEventDateFromTime,
-    detail_event_date_to_date: detailEventDateToDate,
-    detail_event_date_to_time: detailEventDateToTime,
     filters_visible: filtersVisible,
     detail_actions_visible: detailActionsVisible,
     left_pane_visible: leftPaneVisible,
@@ -5786,18 +5806,6 @@ function restoreFilters(){
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
-    if(typeof data.detail_event_date_from_date === 'string' || typeof data.detail_event_date_from_time === 'string'){
-      document.getElementById('detail_event_date_from_date').value = parseDateInputToIso(data.detail_event_date_from_date);
-      document.getElementById('detail_event_date_from_time').value = parseTimeInputToValue(data.detail_event_date_from_time);
-    } else if(typeof data.detail_event_date_from === 'string'){
-      setDateTimePairFromIso('detail_event_date_from_date', 'detail_event_date_from_time', data.detail_event_date_from);
-    }
-    if(typeof data.detail_event_date_to_date === 'string' || typeof data.detail_event_date_to_time === 'string'){
-      document.getElementById('detail_event_date_to_date').value = parseDateInputToIso(data.detail_event_date_to_date);
-      document.getElementById('detail_event_date_to_time').value = parseTimeInputToValue(data.detail_event_date_to_time);
-    } else if(typeof data.detail_event_date_to === 'string'){
-      setDateTimePairFromIso('detail_event_date_to_date', 'detail_event_date_to_time', data.detail_event_date_to);
-    }
     refreshDateTimeInputPairStates();
     if(typeof data.filters_visible === 'boolean') filtersVisible = data.filters_visible;
     if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
@@ -5823,16 +5831,8 @@ function clearFilters(){
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
   document.getElementById('detail_event_label_filter').value = '';
-  document.getElementById('detail_event_date_from_date').value = '';
-  document.getElementById('detail_event_date_from_time').value = '';
-  document.getElementById('detail_event_date_to_date').value = '';
-  document.getElementById('detail_event_date_to_time').value = '';
   refreshDateTimeInputPairStates();
-  try {
-    localStorage.removeItem(FILTER_STORAGE_KEY);
-  } catch (e) {
-    // Ignore storage delete errors.
-  }
+  saveFilters();
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
