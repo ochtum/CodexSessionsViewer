@@ -4617,7 +4617,7 @@ function parseTimeInputToValue(raw){
   const canonical = trimmed
     .replace(/[：]/g, ':')
     .replace(/\s+/g, '');
-  const m = canonical.match(/^(\d{1,2}):(\d{2})$/);
+  const m = canonical.match(/^(\d{1,2}):(\d{2})(?::\d{1,2})?$/);
   if(!m){
     return '';
   }
@@ -4644,6 +4644,51 @@ function extractTimeInputFromIso(isoValue){
   const m = iso.match(/T(\d{2}):(\d{2})$/);
   if(!m) return '';
   return `${m[1]}:${m[2]}`;
+}
+
+function applyDatePasteValue(input, raw){
+  if(!input){
+    return false;
+  }
+  const dateIso = parseDateInputToIso(raw);
+  if(!dateIso){
+    return false;
+  }
+  input.value = dateIso;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
+  if(!dateInput || !timeInput || !target){
+    return false;
+  }
+  const dateTimeIso = parseDateTimeInputToIso(raw);
+  if(dateTimeIso){
+    dateInput.value = parseDateInputToIso(dateTimeIso);
+    timeInput.value = extractTimeInputFromIso(dateTimeIso);
+    syncDateTimeInputPairState(dateInput.id, timeInput.id);
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  if(target === dateInput){
+    const dateIso = parseDateInputToIso(raw);
+    if(!dateIso){
+      return false;
+    }
+    dateInput.value = dateIso;
+    syncDateTimeInputPairState(dateInput.id, timeInput.id);
+    dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  const timeValue = parseTimeInputToValue(raw);
+  if(!timeValue || !parseDateInputToIso(dateInput.value)){
+    return false;
+  }
+  timeInput.value = timeValue;
+  syncDateTimeInputPairState(dateInput.id, timeInput.id);
+  timeInput.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
 }
 
 function setDateTimePairFromIso(dateId, timeId, isoValue){
@@ -6630,11 +6675,59 @@ function bindDateTimePairChange(dateId, timeId, handler){
   safeBindById(timeId, 'change', run);
 }
 
+function bindDatePaste(id){
+  const input = document.getElementById(id);
+  if(!input || input.dataset.datePasteReady === '1'){
+    return;
+  }
+  input.dataset.datePasteReady = '1';
+  input.addEventListener('paste', (event) => {
+    const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+    if(text && applyDatePasteValue(input, text)){
+      event.preventDefault();
+      return;
+    }
+    setTimeout(() => {
+      applyDatePasteValue(input, input.value || '');
+    }, 0);
+  });
+}
+
+function bindDateTimePairPaste(dateId, timeId){
+  const dateInput = document.getElementById(dateId);
+  const timeInput = document.getElementById(timeId);
+  if(!dateInput || !timeInput){
+    return;
+  }
+  const bindPaste = (input) => {
+    if(!input || input.dataset.dateTimePasteReady === '1'){
+      return;
+    }
+    input.dataset.dateTimePasteReady = '1';
+    input.addEventListener('paste', (event) => {
+      const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+      if(text && applyDateTimePairPasteValue(dateInput, timeInput, input, text)){
+        event.preventDefault();
+        return;
+      }
+      setTimeout(() => {
+        applyDateTimePairPasteValue(dateInput, timeInput, input, input.value || '');
+      }, 0);
+    });
+  };
+  bindPaste(dateInput);
+  bindPaste(timeInput);
+}
+
 safeBindById('cwd_q', 'input', applyFilter);
 safeBindById('date_from', 'change', applyFilter);
 safeBindById('date_to', 'change', applyFilter);
 bindDateTimePairChange('event_date_from_date', 'event_date_from_time', applyFilter);
 bindDateTimePairChange('event_date_to_date', 'event_date_to_time', applyFilter);
+bindDatePaste('date_from');
+bindDatePaste('date_to');
+bindDateTimePairPaste('event_date_from_date', 'event_date_from_time');
+bindDateTimePairPaste('event_date_to_date', 'event_date_to_time');
 safeBindById('q', 'input', scheduleLoadSessions);
 safeBindById('mode', 'change', scheduleLoadSessions);
 safeBindById('source_filter', 'change', applyFilter);
@@ -6658,6 +6751,8 @@ bindDateTimePairChange('detail_event_date_to_date', 'detail_event_date_to_time',
   saveFilters();
   renderActiveSession();
 });
+bindDateTimePairPaste('detail_event_date_from_date', 'detail_event_date_from_time');
+bindDateTimePairPaste('detail_event_date_to_date', 'detail_event_date_to_time');
 safeBindById('clear_detail_event_date', 'click', () => {
   document.getElementById('detail_event_date_from_date').value = '';
   document.getElementById('detail_event_date_from_time').value = '';
