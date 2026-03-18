@@ -1619,7 +1619,7 @@ header h1 {
   text-align: center;
   font-family: var(--font-sans);
   font-size: var(--text-body);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--text);
   padding: 0;
   line-height: 32px;
@@ -1665,7 +1665,7 @@ header h1 {
   transition: background 0.15s ease, color 0.15s ease;
 }
 .seg-wrap .seg-icon:hover {
-  background: rgba(15, 118, 110, 0.08);
+  background: transparent;
   color: var(--accent-strong);
 }
 .seg-wrap .seg-icon svg {
@@ -1689,39 +1689,36 @@ header h1 {
   flex-direction: column;
   margin-left: auto;
   flex-shrink: 0;
-  width: 16px;
-  height: 28px;
+  width: 20px;
+  height: 32px;
   justify-content: center;
+  align-items: center;
   gap: 0;
 }
 .seg-wrap .seg-spin button {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 14px;
+  width: 20px;
+  height: 16px;
   border: 0;
   background: transparent;
   cursor: pointer;
   padding: 0;
   color: #94a3b8;
   transition: color 0.12s ease;
-  line-height: 14px;
-  overflow: visible;
-  position: relative;
+  line-height: 1;
+  overflow: hidden;
 }
 .seg-wrap .seg-spin button:hover {
   color: var(--accent-strong);
 }
 .seg-wrap .seg-spin button svg {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   fill: currentColor;
   display: block;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  flex-shrink: 0;
 }
 .flatpickr-calendar {
   font-family: var(--font-sans);
@@ -1988,7 +1985,7 @@ button {
   font-size: var(--text-body);
   line-height: 1.4;
 }
-input:not([type="checkbox"]):not([type="radio"]):not(.seg),
+input:not([type="checkbox"]):not([type="radio"]):not(.seg):not(.cur-year),
 select {
   width: 100%;
   min-height: 40px;
@@ -2000,16 +1997,16 @@ select {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
-input:not([type="checkbox"]):not([type="radio"]):not(.seg)::placeholder {
+input:not([type="checkbox"]):not([type="radio"]):not(.seg):not(.cur-year)::placeholder {
   color: #95a3b3;
 }
-input:not([type="checkbox"]):not([type="radio"]):not(.seg):focus,
+input:not([type="checkbox"]):not([type="radio"]):not(.seg):not(.cur-year):focus,
 select:focus {
   outline: none;
   border-color: rgba(15, 118, 110, 0.46);
   box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
 }
-input:not([type="checkbox"]):not([type="radio"]):not(.seg):disabled,
+input:not([type="checkbox"]):not([type="radio"]):not(.seg):not(.cur-year):disabled,
 select:disabled {
   background: #eef3f8;
   color: #98a6b6;
@@ -3543,11 +3540,11 @@ function buildSegTime(hiddenId){
   const upBtn = document.createElement('button');
   upBtn.type = 'button';
   upBtn.tabIndex = -1;
-  upBtn.innerHTML = '<svg viewBox="0 0 10 10"><path d="M2 7L5 3l3 4z"/></svg>';
+  upBtn.innerHTML = '<svg viewBox="0 0 12 12"><path d="M2 8L6 4l4 4z"/></svg>';
   const downBtn = document.createElement('button');
   downBtn.type = 'button';
   downBtn.tabIndex = -1;
-  downBtn.innerHTML = '<svg viewBox="0 0 10 10"><path d="M2 3l3 4 3-4z"/></svg>';
+  downBtn.innerHTML = '<svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4z"/></svg>';
   spin.appendChild(upBtn);
   spin.appendChild(downBtn);
   wrap.appendChild(spin);
