@@ -3359,19 +3359,19 @@ function segStepValue(segments, idx, delta){
     if(val < 1900) val = 1900;
     if(val > 2999) val = 2999;
     seg.value = String(val);
-  } else if(seg.className.indexOf('seg-m') >= 0 && seg.className.indexOf('seg-mi') < 0){
+  } else if(seg.classList.contains('seg-m')){
     if(val < 1) val = 12;
     if(val > 12) val = 1;
     seg.value = pad2(val);
-  } else if(seg.className.indexOf('seg-d') >= 0){
+  } else if(seg.classList.contains('seg-d')){
     if(val < 1) val = 31;
     if(val > 31) val = 1;
     seg.value = pad2(val);
-  } else if(seg.className.indexOf('seg-h') >= 0){
+  } else if(seg.classList.contains('seg-h')){
     if(val < 0) val = 23;
     if(val > 23) val = 0;
     seg.value = pad2(val);
-  } else if(seg.className.indexOf('seg-mi') >= 0){
+  } else if(seg.classList.contains('seg-mi')){
     if(val < 0) val = 59;
     if(val > 59) val = 0;
     seg.value = pad2(val);
@@ -3429,11 +3429,11 @@ function buildSegDate(hiddenId){
     seg.addEventListener('focus', () => seg.select());
   });
   wrap.addEventListener('paste', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     const text = e.clipboardData ? e.clipboardData.getData('text') : '';
     const iso = parseDateInputToIso(text);
     if(iso){
-      e.preventDefault();
-      e.stopPropagation();
       setFromIso(iso);
       hidden.dispatchEvent(new Event('change', { bubbles: true }));
     }
@@ -3486,11 +3486,11 @@ function buildSegTime(hiddenId){
     seg.addEventListener('focus', () => seg.select());
   });
   wrap.addEventListener('paste', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     const text = e.clipboardData ? e.clipboardData.getData('text') : '';
     const tv = parseTimeInputToValue(text);
     if(tv){
-      e.preventDefault();
-      e.stopPropagation();
       setFromValue(tv);
       hidden.dispatchEvent(new Event('change', { bubbles: true }));
     }
