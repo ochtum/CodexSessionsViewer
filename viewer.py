@@ -2892,14 +2892,14 @@ pre {
               <span id="event_date_from_label">イベント開始日時</span>
               <div class="datetime-split">
                 <input id="event_date_from_date" type="text" aria-label="イベント開始日時 日付" />
-                <input id="event_date_from_time" type="hidden" aria-label="イベント開始日時 時間" />
+                <input id="event_date_from_time" type="hidden" />
               </div>
             </div>
             <div class="field">
               <span id="event_date_to_label">イベント終了日時</span>
               <div class="datetime-split">
                 <input id="event_date_to_date" type="text" aria-label="イベント終了日時 日付" />
-                <input id="event_date_to_time" type="hidden" aria-label="イベント終了日時 時間" />
+                <input id="event_date_to_time" type="hidden" />
               </div>
             </div>
             <label class="field">
@@ -2998,14 +2998,14 @@ pre {
               <span id="detail_event_date_from_label">イベント開始日時</span>
               <div class="datetime-split">
                 <input id="detail_event_date_from_date" type="text" aria-label="詳細イベント開始日時 日付" />
-                <input id="detail_event_date_from_time" type="hidden" aria-label="詳細イベント開始日時 時間" />
+                <input id="detail_event_date_from_time" type="hidden" />
               </div>
             </div>
             <div class="field">
               <span id="detail_event_date_to_label">イベント終了日時</span>
               <div class="datetime-split">
                 <input id="detail_event_date_to_date" type="text" aria-label="詳細イベント終了日時 日付" />
-                <input id="detail_event_date_to_time" type="hidden" aria-label="詳細イベント終了日時 時間" />
+                <input id="detail_event_date_to_time" type="hidden" />
               </div>
             </div>
             <div class="detail-event-date-actions">
@@ -3242,7 +3242,7 @@ function initFlatpickrDateTime(dateId, timeId, onChange){
   if(typeof flatpickr === 'undefined') return;
   const el = document.getElementById(dateId);
   if(!el) return;
-  const initial = prevDate ? (prevDate + (prevTime ? ' ' + prevTime : '')) : '';
+  const initial = combineDateTimeStr(prevDate, prevTime);
   const fp = flatpickr(el, {
     enableTime: true,
     dateFormat: 'Y-m-d H:i',
@@ -3303,12 +3303,15 @@ function setFpDateValue(id, value){
     if(el) el.value = value || '';
   }
 }
+function combineDateTimeStr(dateStr, timeStr){
+  if(!dateStr) return '';
+  return timeStr ? dateStr + ' ' + timeStr : dateStr;
+}
 function setFpDateTimeValue(dateId, timeId, dateVal, timeVal){
   const fp = fpInstances[dateId];
   const timeEl = document.getElementById(timeId);
   if(fp){
-    const combined = dateVal ? (dateVal + (timeVal ? ' ' + timeVal : '')) : '';
-    fp.setDate(combined || null, false);
+    fp.setDate(combineDateTimeStr(dateVal, timeVal) || null, false);
   } else {
     const el = document.getElementById(dateId);
     if(el) el.value = dateVal || '';
@@ -4022,8 +4025,7 @@ function setInputAriaLabel(id, value){
 }
 
 function setDateTimePairAria(dateId, timeId, label){
-  setInputAriaLabel(dateId, `${label} ${t('common.date')}`);
-  setInputAriaLabel(timeId, `${label} ${t('common.time')}`);
+  setInputAriaLabel(dateId, label);
 }
 
 function setToggleLabel(inputId, value){
@@ -4860,8 +4862,7 @@ function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
     const timeVal = extractTimeInputFromIso(dateTimeIso);
     const fp = fpInstances[dateInput.id];
     if(fp){
-      const combined = dateVal + (timeVal ? ' ' + timeVal : '');
-      fp.setDate(combined, true);
+      fp.setDate(combineDateTimeStr(dateVal, timeVal), true);
       if(timeInput) timeInput.value = timeVal;
     } else {
       dateInput.value = dateVal;
