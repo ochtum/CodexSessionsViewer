@@ -6596,6 +6596,10 @@ function openRelativeSession(step){
     return false;
   }
   openSession(nextSession.path, { mode: 'open' });
+  const activeEl = document.querySelector('#sessions .session-item.active');
+  if(activeEl){
+    activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
   return true;
 }
 
