@@ -1141,6 +1141,11 @@ HTML_PAGE = """<!doctype html>
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
 <title>Codex Sessions Viewer</title>
 <link rel=\"icon\" href=\"/icons/codex-sessions-viewer.svg\" type=\"image/svg+xml\" />
+<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css\" />
+<script src=\"https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js\"></script>
+<script src=\"https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/ja.js\"></script>
+<script src=\"https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/zh.js\"></script>
+<script src=\"https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/zh-tw.js\"></script>
 <style>
 :root {
   --bg: #edf4fb;
@@ -1569,15 +1574,12 @@ header h1 {
 }
 .datetime-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px;
+  grid-template-columns: 1fr;
   gap: var(--space-3);
   align-items: center;
 }
 .datetime-split > input {
   min-width: 0;
-}
-.datetime-split > input[type="time"] {
-  padding-right: var(--space-3);
 }
 .field-grid .datetime-split,
 .detail-event-date-row .datetime-split {
@@ -2880,24 +2882,24 @@ pre {
           <div class="field-grid">
             <label class="field">
               <span>開始日</span>
-              <input id="date_from" type="date" />
+              <input id="date_from" type="text" />
             </label>
             <label class="field">
               <span>終了日</span>
-              <input id="date_to" type="date" />
+              <input id="date_to" type="text" />
             </label>
             <div class="field">
               <span id="event_date_from_label">イベント開始日時</span>
               <div class="datetime-split">
-                <input id="event_date_from_date" type="date" aria-label="イベント開始日時 日付" />
-                <input id="event_date_from_time" type="time" step="60" aria-label="イベント開始日時 時間" />
+                <input id="event_date_from_date" type="text" aria-label="イベント開始日時 日付" />
+                <input id="event_date_from_time" type="hidden" aria-label="イベント開始日時 時間" />
               </div>
             </div>
             <div class="field">
               <span id="event_date_to_label">イベント終了日時</span>
               <div class="datetime-split">
-                <input id="event_date_to_date" type="date" aria-label="イベント終了日時 日付" />
-                <input id="event_date_to_time" type="time" step="60" aria-label="イベント終了日時 時間" />
+                <input id="event_date_to_date" type="text" aria-label="イベント終了日時 日付" />
+                <input id="event_date_to_time" type="hidden" aria-label="イベント終了日時 時間" />
               </div>
             </div>
             <label class="field">
@@ -2995,15 +2997,15 @@ pre {
             <div class="field">
               <span id="detail_event_date_from_label">イベント開始日時</span>
               <div class="datetime-split">
-                <input id="detail_event_date_from_date" type="date" aria-label="詳細イベント開始日時 日付" />
-                <input id="detail_event_date_from_time" type="time" step="60" aria-label="詳細イベント開始日時 時間" />
+                <input id="detail_event_date_from_date" type="text" aria-label="詳細イベント開始日時 日付" />
+                <input id="detail_event_date_from_time" type="hidden" aria-label="詳細イベント開始日時 時間" />
               </div>
             </div>
             <div class="field">
               <span id="detail_event_date_to_label">イベント終了日時</span>
               <div class="datetime-split">
-                <input id="detail_event_date_to_date" type="date" aria-label="詳細イベント終了日時 日付" />
-                <input id="detail_event_date_to_time" type="time" step="60" aria-label="詳細イベント終了日時 時間" />
+                <input id="detail_event_date_to_date" type="text" aria-label="詳細イベント終了日時 日付" />
+                <input id="detail_event_date_to_time" type="hidden" aria-label="詳細イベント終了日時 時間" />
               </div>
             </div>
             <div class="detail-event-date-actions">
@@ -3168,6 +3170,183 @@ const state = {
 
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
 const LANGUAGE_STORAGE_KEY = 'codex_sessions_viewer_language_v1';
+const fpInstances = {};
+const FP_LOCALE_MAP = {
+  ja: typeof flatpickr !== 'undefined' && flatpickr.l10ns && flatpickr.l10ns.ja ? flatpickr.l10ns.ja : null,
+  en: null,
+  'zh-Hans': typeof flatpickr !== 'undefined' && flatpickr.l10ns && flatpickr.l10ns.zh ? flatpickr.l10ns.zh : null,
+  'zh-Hant': typeof flatpickr !== 'undefined' && flatpickr.l10ns && flatpickr.l10ns.zh_tw ? flatpickr.l10ns.zh_tw : null,
+};
+function getFpLocale(){
+  return FP_LOCALE_MAP[uiLanguage] || undefined;
+}
+function buildFpExtraActions(opts){
+  const wrap = document.createElement('div');
+  wrap.className = 'flatpickr-extra-actions';
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'flatpickr-action flatpickr-action-danger';
+  clearBtn.textContent = t('calendar.clear');
+  clearBtn.addEventListener('click', () => {
+    if(opts.onClear) opts.onClear();
+  });
+  const todayBtn = document.createElement('button');
+  todayBtn.type = 'button';
+  todayBtn.className = 'flatpickr-action flatpickr-action-secondary';
+  todayBtn.textContent = t('calendar.today');
+  todayBtn.addEventListener('click', () => {
+    if(opts.onToday) opts.onToday();
+  });
+  wrap.appendChild(clearBtn);
+  wrap.appendChild(todayBtn);
+  return wrap;
+}
+function initFlatpickrDate(id, onChange){
+  const prevValue = parseDateInputToIso(getFpDateValue(id));
+  destroyFpInstance(id);
+  if(typeof flatpickr === 'undefined') return;
+  const el = document.getElementById(id);
+  if(!el) return;
+  const fp = flatpickr(el, {
+    dateFormat: 'Y-m-d',
+    allowInput: true,
+    locale: getFpLocale(),
+    clickOpens: true,
+    onReady: function(selectedDates, dateStr, instance){
+      const actions = buildFpExtraActions({
+        onClear: function(){
+          instance.clear();
+          instance.close();
+          if(onChange) onChange();
+        },
+        onToday: function(){
+          instance.setDate(new Date(), true);
+          instance.close();
+          if(onChange) onChange();
+        },
+      });
+      instance.calendarContainer.appendChild(actions);
+    },
+    onChange: function(){
+      if(onChange) onChange();
+    },
+  });
+  if(prevValue) fp.setDate(prevValue, false);
+  fpInstances[id] = fp;
+}
+function initFlatpickrDateTime(dateId, timeId, onChange){
+  const prevDate = parseDateInputToIso(getFpDateValue(dateId));
+  const timeEl = document.getElementById(timeId);
+  const prevTime = timeEl ? parseTimeInputToValue(timeEl.value) : '';
+  destroyFpInstance(dateId);
+  if(typeof flatpickr === 'undefined') return;
+  const el = document.getElementById(dateId);
+  if(!el) return;
+  const initial = prevDate ? (prevDate + (prevTime ? ' ' + prevTime : '')) : '';
+  const fp = flatpickr(el, {
+    enableTime: true,
+    dateFormat: 'Y-m-d H:i',
+    time_24hr: true,
+    allowInput: true,
+    locale: getFpLocale(),
+    clickOpens: true,
+    onReady: function(selectedDates, dateStr, instance){
+      const actions = buildFpExtraActions({
+        onClear: function(){
+          instance.clear();
+          if(timeEl) timeEl.value = '';
+          instance.close();
+          if(onChange) onChange();
+        },
+        onToday: function(){
+          instance.setDate(new Date(), true);
+          syncFpDateTimeToHidden(instance, timeEl);
+          instance.close();
+          if(onChange) onChange();
+        },
+      });
+      instance.calendarContainer.appendChild(actions);
+    },
+    onChange: function(selectedDates, dateStr, instance){
+      syncFpDateTimeToHidden(instance, timeEl);
+      if(onChange) onChange();
+    },
+  });
+  if(initial) fp.setDate(initial, false);
+  fpInstances[dateId] = fp;
+}
+function syncFpDateTimeToHidden(instance, timeEl){
+  if(!timeEl) return;
+  const sel = instance.selectedDates;
+  if(sel.length > 0){
+    const d = sel[0];
+    timeEl.value = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  } else {
+    timeEl.value = '';
+  }
+}
+function destroyFpInstance(id){
+  if(fpInstances[id]){
+    fpInstances[id].destroy();
+    delete fpInstances[id];
+  }
+}
+function destroyAllFpInstances(){
+  Object.keys(fpInstances).forEach(destroyFpInstance);
+}
+function setFpDateValue(id, value){
+  const fp = fpInstances[id];
+  if(fp){
+    fp.setDate(value || null, false);
+  } else {
+    const el = document.getElementById(id);
+    if(el) el.value = value || '';
+  }
+}
+function setFpDateTimeValue(dateId, timeId, dateVal, timeVal){
+  const fp = fpInstances[dateId];
+  const timeEl = document.getElementById(timeId);
+  if(fp){
+    const combined = dateVal ? (dateVal + (timeVal ? ' ' + timeVal : '')) : '';
+    fp.setDate(combined || null, false);
+  } else {
+    const el = document.getElementById(dateId);
+    if(el) el.value = dateVal || '';
+  }
+  if(timeEl) timeEl.value = timeVal || '';
+}
+function clearFpInstance(id){
+  const fp = fpInstances[id];
+  if(fp){
+    fp.clear();
+  } else {
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  }
+}
+function getFpDateValue(id){
+  const fp = fpInstances[id];
+  if(fp && fp.selectedDates.length > 0){
+    const d = fp.selectedDates[0];
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+  const el = document.getElementById(id);
+  return el ? el.value : '';
+}
+function initAllFlatpickr(){
+  initFlatpickrDate('date_from', applyFilter);
+  initFlatpickrDate('date_to', applyFilter);
+  initFlatpickrDateTime('event_date_from_date', 'event_date_from_time', applyFilter);
+  initFlatpickrDateTime('event_date_to_date', 'event_date_to_time', applyFilter);
+  initFlatpickrDateTime('detail_event_date_from_date', 'detail_event_date_from_time', function(){
+    saveFilters();
+    renderActiveSession();
+  });
+  initFlatpickrDateTime('detail_event_date_to_date', 'detail_event_date_to_time', function(){
+    saveFilters();
+    renderActiveSession();
+  });
+}
 const SUPPORTED_LANGUAGES = ['ja', 'en', 'zh-Hans', 'zh-Hant'];
 const I18N = {
   ja: {
@@ -3992,6 +4171,7 @@ function applyMainLanguage(){
   renderSessionList();
   renderSessionLabelStrip();
   renderActiveSession();
+  initAllFlatpickr();
 }
 
 function setUiLanguage(nextLanguage, persist){
@@ -4660,8 +4840,13 @@ function applyDatePasteValue(input, raw){
   if(!dateIso){
     return false;
   }
-  input.value = dateIso;
-  input.dispatchEvent(new Event('change', { bubbles: true }));
+  const fp = fpInstances[input.id];
+  if(fp){
+    fp.setDate(dateIso, true);
+  } else {
+    input.value = dateIso;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
   return true;
 }
 
@@ -4671,8 +4856,17 @@ function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
   }
   const dateTimeIso = parseDateTimeInputToIso(raw);
   if(dateTimeIso){
-    dateInput.value = parseDateInputToIso(dateTimeIso);
-    timeInput.value = extractTimeInputFromIso(dateTimeIso);
+    const dateVal = parseDateInputToIso(dateTimeIso);
+    const timeVal = extractTimeInputFromIso(dateTimeIso);
+    const fp = fpInstances[dateInput.id];
+    if(fp){
+      const combined = dateVal + (timeVal ? ' ' + timeVal : '');
+      fp.setDate(combined, true);
+      if(timeInput) timeInput.value = timeVal;
+    } else {
+      dateInput.value = dateVal;
+      timeInput.value = timeVal;
+    }
     syncDateTimeInputPairState(dateInput.id, timeInput.id);
     target.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
@@ -4682,7 +4876,12 @@ function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
     if(!dateIso){
       return false;
     }
-    dateInput.value = dateIso;
+    const fp = fpInstances[dateInput.id];
+    if(fp){
+      fp.setDate(dateIso, true);
+    } else {
+      dateInput.value = dateIso;
+    }
     syncDateTimeInputPairState(dateInput.id, timeInput.id);
     dateInput.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
@@ -4698,14 +4897,9 @@ function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
 }
 
 function setDateTimePairFromIso(dateId, timeId, isoValue){
-  const dateInput = document.getElementById(dateId);
-  const timeInput = document.getElementById(timeId);
-  if(dateInput){
-    dateInput.value = parseDateInputToIso(isoValue);
-  }
-  if(timeInput){
-    timeInput.value = extractTimeInputFromIso(isoValue);
-  }
+  const dateVal = parseDateInputToIso(isoValue);
+  const timeVal = extractTimeInputFromIso(isoValue);
+  setFpDateTimeValue(dateId, timeId, dateVal, timeVal);
   syncDateTimeInputPairState(dateId, timeId);
 }
 
@@ -5550,18 +5744,18 @@ function hasDetailFilter(){
     ((state.selectedEventIds && state.selectedEventIds.size) || 0) > 0 ||
     state.isMessageRangeSelectionMode ||
     state.selectedMessageRangeEventId ||
-    document.getElementById('detail_event_date_from_date').value ||
+    getFpDateValue('detail_event_date_from_date') ||
     document.getElementById('detail_event_date_from_time').value ||
-    document.getElementById('detail_event_date_to_date').value ||
+    getFpDateValue('detail_event_date_to_date') ||
     document.getElementById('detail_event_date_to_time').value
   );
 }
 
 function hasDetailEventDateFilter(){
   return Boolean(
-    document.getElementById('detail_event_date_from_date').value ||
+    getFpDateValue('detail_event_date_from_date') ||
     document.getElementById('detail_event_date_from_time').value ||
-    document.getElementById('detail_event_date_to_date').value ||
+    getFpDateValue('detail_event_date_to_date') ||
     document.getElementById('detail_event_date_to_time').value
   );
 }
@@ -5577,11 +5771,11 @@ function updateClearDetailButtonState(){
 function hasListFilter(){
   return Boolean(
     document.getElementById('cwd_q').value.trim() ||
-    document.getElementById('date_from').value ||
-    document.getElementById('date_to').value ||
-    document.getElementById('event_date_from_date').value ||
+    getFpDateValue('date_from') ||
+    getFpDateValue('date_to') ||
+    getFpDateValue('event_date_from_date') ||
     document.getElementById('event_date_from_time').value ||
-    document.getElementById('event_date_to_date').value ||
+    getFpDateValue('event_date_to_date') ||
     document.getElementById('event_date_to_time').value ||
     document.getElementById('q').value.trim() ||
     normalizeSourceFilter(document.getElementById('source_filter').value || 'all') !== 'all' ||
@@ -5722,30 +5916,26 @@ async function loadSessions(options){
 }
 
 function saveFilters(){
-  const dateFromIso = parseDateInputToIso(document.getElementById('date_from').value);
-  const dateToIso = parseDateInputToIso(document.getElementById('date_to').value);
-  const eventDateFromDate = parseDateInputToIso(document.getElementById('event_date_from_date').value);
+  const dateFromIso = parseDateInputToIso(getFpDateValue('date_from'));
+  const dateToIso = parseDateInputToIso(getFpDateValue('date_to'));
+  const eventDateFromDate = parseDateInputToIso(getFpDateValue('event_date_from_date'));
   const eventDateFromTime = parseTimeInputToValue(document.getElementById('event_date_from_time').value);
-  const eventDateToDate = parseDateInputToIso(document.getElementById('event_date_to_date').value);
+  const eventDateToDate = parseDateInputToIso(getFpDateValue('event_date_to_date'));
   const eventDateToTime = parseTimeInputToValue(document.getElementById('event_date_to_time').value);
-  const detailEventDateFromDate = parseDateInputToIso(document.getElementById('detail_event_date_from_date').value);
+  const detailEventDateFromDate = parseDateInputToIso(getFpDateValue('detail_event_date_from_date'));
   const detailEventDateFromTime = parseTimeInputToValue(document.getElementById('detail_event_date_from_time').value);
-  const detailEventDateToDate = parseDateInputToIso(document.getElementById('detail_event_date_to_date').value);
+  const detailEventDateToDate = parseDateInputToIso(getFpDateValue('detail_event_date_to_date'));
   const detailEventDateToTime = parseTimeInputToValue(document.getElementById('detail_event_date_to_time').value);
   const eventDateFromIso = buildDateTimeIsoFromParts(eventDateFromDate, eventDateFromTime, 'start');
   const eventDateToIso = buildDateTimeIsoFromParts(eventDateToDate, eventDateToTime, 'end');
   const detailEventDateFromIso = buildDateTimeIsoFromParts(detailEventDateFromDate, detailEventDateFromTime, 'start');
   const detailEventDateToIso = buildDateTimeIsoFromParts(detailEventDateToDate, detailEventDateToTime, 'end');
-  document.getElementById('date_from').value = dateFromIso;
-  document.getElementById('date_to').value = dateToIso;
-  document.getElementById('event_date_from_date').value = eventDateFromDate;
-  document.getElementById('event_date_from_time').value = eventDateFromTime;
-  document.getElementById('event_date_to_date').value = eventDateToDate;
-  document.getElementById('event_date_to_time').value = eventDateToTime;
-  document.getElementById('detail_event_date_from_date').value = detailEventDateFromDate;
-  document.getElementById('detail_event_date_from_time').value = detailEventDateFromTime;
-  document.getElementById('detail_event_date_to_date').value = detailEventDateToDate;
-  document.getElementById('detail_event_date_to_time').value = detailEventDateToTime;
+  setFpDateValue('date_from', dateFromIso);
+  setFpDateValue('date_to', dateToIso);
+  setFpDateTimeValue('event_date_from_date', 'event_date_from_time', eventDateFromDate, eventDateFromTime);
+  setFpDateTimeValue('event_date_to_date', 'event_date_to_time', eventDateToDate, eventDateToTime);
+  setFpDateTimeValue('detail_event_date_from_date', 'detail_event_date_from_time', detailEventDateFromDate, detailEventDateFromTime);
+  setFpDateTimeValue('detail_event_date_to_date', 'detail_event_date_to_time', detailEventDateToDate, detailEventDateToTime);
   refreshDateTimeInputPairStates();
   const payload = {
     cwd_q: document.getElementById('cwd_q').value,
@@ -5784,17 +5974,15 @@ function restoreFilters(){
   try {
     const data = JSON.parse(raw);
     if(typeof data.cwd_q === 'string') document.getElementById('cwd_q').value = data.cwd_q;
-    if(typeof data.date_from === 'string') document.getElementById('date_from').value = parseDateInputToIso(data.date_from);
-    if(typeof data.date_to === 'string') document.getElementById('date_to').value = parseDateInputToIso(data.date_to);
+    if(typeof data.date_from === 'string') setFpDateValue('date_from', parseDateInputToIso(data.date_from));
+    if(typeof data.date_to === 'string') setFpDateValue('date_to', parseDateInputToIso(data.date_to));
     if(typeof data.event_date_from_date === 'string' || typeof data.event_date_from_time === 'string'){
-      document.getElementById('event_date_from_date').value = parseDateInputToIso(data.event_date_from_date);
-      document.getElementById('event_date_from_time').value = parseTimeInputToValue(data.event_date_from_time);
+      setFpDateTimeValue('event_date_from_date', 'event_date_from_time', parseDateInputToIso(data.event_date_from_date), parseTimeInputToValue(data.event_date_from_time));
     } else if(typeof data.event_date_from === 'string'){
       setDateTimePairFromIso('event_date_from_date', 'event_date_from_time', data.event_date_from);
     }
     if(typeof data.event_date_to_date === 'string' || typeof data.event_date_to_time === 'string'){
-      document.getElementById('event_date_to_date').value = parseDateInputToIso(data.event_date_to_date);
-      document.getElementById('event_date_to_time').value = parseTimeInputToValue(data.event_date_to_time);
+      setFpDateTimeValue('event_date_to_date', 'event_date_to_time', parseDateInputToIso(data.event_date_to_date), parseTimeInputToValue(data.event_date_to_time));
     } else if(typeof data.event_date_to === 'string'){
       setDateTimePairFromIso('event_date_to_date', 'event_date_to_time', data.event_date_to);
     }
@@ -5818,11 +6006,11 @@ function restoreFilters(){
 function clearFilters(){
   cancelScheduledSaveFilters();
   document.getElementById('cwd_q').value = '';
-  document.getElementById('date_from').value = '';
-  document.getElementById('date_to').value = '';
-  document.getElementById('event_date_from_date').value = '';
+  clearFpInstance('date_from');
+  clearFpInstance('date_to');
+  clearFpInstance('event_date_from_date');
   document.getElementById('event_date_from_time').value = '';
-  document.getElementById('event_date_to_date').value = '';
+  clearFpInstance('event_date_to_date');
   document.getElementById('event_date_to_time').value = '';
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
@@ -5843,17 +6031,17 @@ function clearFilters(){
 function applyFilter(){
   const cwdQ = document.getElementById('cwd_q').value.toLowerCase().trim();
   const sourceFilter = normalizeSourceFilter(document.getElementById('source_filter').value || 'all');
-  const fromRaw = document.getElementById('date_from').value;
-  const toRaw = document.getElementById('date_to').value;
+  const fromRaw = getFpDateValue('date_from');
+  const toRaw = getFpDateValue('date_to');
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
   const evFromRaw = buildDateTimeIsoFromParts(
-    document.getElementById('event_date_from_date').value,
+    getFpDateValue('event_date_from_date'),
     document.getElementById('event_date_from_time').value,
     'start'
   );
   const evToRaw = buildDateTimeIsoFromParts(
-    document.getElementById('event_date_to_date').value,
+    getFpDateValue('event_date_to_date'),
     document.getElementById('event_date_to_time').value,
     'end'
   );
@@ -6012,12 +6200,12 @@ function getDisplayEvents(){
     events = events.filter(ev => containsLiteralKeyword(getEventBodyText(ev), detailKeywordFilterTerm));
   }
   const detailEvFromRaw = buildDateTimeIsoFromParts(
-    document.getElementById('detail_event_date_from_date').value,
+    getFpDateValue('detail_event_date_from_date'),
     document.getElementById('detail_event_date_from_time').value,
     'start'
   );
   const detailEvToRaw = buildDateTimeIsoFromParts(
-    document.getElementById('detail_event_date_to_date').value,
+    getFpDateValue('detail_event_date_to_date'),
     document.getElementById('detail_event_date_to_time').value,
     'end'
   );
@@ -6277,9 +6465,9 @@ function clearDetailFilters(){
   if(detailKeywordInput){
     detailKeywordInput.value = '';
   }
-  document.getElementById('detail_event_date_from_date').value = '';
+  clearFpInstance('detail_event_date_from_date');
   document.getElementById('detail_event_date_from_time').value = '';
-  document.getElementById('detail_event_date_to_date').value = '';
+  clearFpInstance('detail_event_date_to_date');
   document.getElementById('detail_event_date_to_time').value = '';
   refreshDateTimeInputPairStates();
   resetDetailKeywordState();
@@ -6754,9 +6942,9 @@ bindDateTimePairChange('detail_event_date_to_date', 'detail_event_date_to_time',
 bindDateTimePairPaste('detail_event_date_from_date', 'detail_event_date_from_time');
 bindDateTimePairPaste('detail_event_date_to_date', 'detail_event_date_to_time');
 safeBindById('clear_detail_event_date', 'click', () => {
-  document.getElementById('detail_event_date_from_date').value = '';
+  clearFpInstance('detail_event_date_from_date');
   document.getElementById('detail_event_date_from_time').value = '';
-  document.getElementById('detail_event_date_to_date').value = '';
+  clearFpInstance('detail_event_date_to_date');
   document.getElementById('detail_event_date_to_time').value = '';
   refreshDateTimeInputPairStates();
   saveFilters();
@@ -7057,6 +7245,7 @@ updateDetailKeywordControls({ total: 0 });
 updateRefreshDetailButtonState();
 updateFilterVisibility();
 restoreFilters();
+initAllFlatpickr();
 setUiLanguage(getRequestedLanguage(), false);
 updateFilterVisibility();
 updateDetailMetaVisibility();
