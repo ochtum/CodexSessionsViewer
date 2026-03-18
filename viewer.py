@@ -2682,7 +2682,8 @@ pre {
 .ev-body-wrap{position:relative;}
 .ev-body-wrap.collapsed pre{max-height:calc(10 * 1.65em + 20px);overflow:hidden;position:relative;}
 .ev-body-wrap.collapsed pre::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2.4em;background:linear-gradient(to bottom,rgba(248,250,252,0),rgba(248,250,252,0.95));border-radius:0 0 12px 12px;pointer-events:none;}
-.ev-body-toggle{display:block;margin-top:4px;padding:2px 8px;border:1px solid rgba(203,213,225,0.56);border-radius:8px;background:rgba(248,250,252,0.78);color:var(--muted);font-size:var(--text-caption);cursor:pointer;}
+.ev-body-toggle{display:none;margin-top:4px;padding:2px 8px;border:1px solid rgba(203,213,225,0.56);border-radius:8px;background:rgba(248,250,252,0.78);color:var(--muted);font-size:var(--text-caption);cursor:pointer;}
+.ev-body-wrap.collapsible .ev-body-toggle{display:block;}
 .ev-body-toggle:hover{background:rgba(226,232,240,0.78);}
 @media (max-width: 1180px) {
   :root {
@@ -4352,12 +4353,8 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
   const eventKey = getDetailEventKey(ev, fallbackIndex);
   const bodyText = getEventBodyText(ev);
   const eventMatches = searchMeta && searchMeta.matchesByEvent ? (searchMeta.matchesByEvent.get(eventKey) || []) : [];
-  const lineCount = (bodyText || '').split('\\n').length;
-  const collapsible = lineCount > 20;
   const bodyInner = `<pre>${renderHighlightedEventBody(bodyText, eventMatches)}</pre>`;
-  const body = collapsible
-    ? `<div class="ev-body-wrap collapsed">${bodyInner}<button class="ev-body-toggle">${esc(t('detail.bodyExpand'))}</button></div>`
-    : bodyInner;
+  const body = `<div class="ev-body-wrap">${bodyInner}<button class="ev-body-toggle">${esc(t('detail.bodyExpand'))}</button></div>`;
   const selectionKey = getEventSelectionKey(ev);
   const isSelectable = state.isEventSelectionMode && isSelectableMessageEvent(ev);
   const isSelected = selectionKey && state.selectedEventIds.has(selectionKey);
@@ -4403,6 +4400,16 @@ function attachVisibleEventCardHandlers(eventsBox){
     button.onclick = async () => {
       await removeEventLabel(button.dataset.eventId, Number(button.dataset.labelId));
     };
+  });
+  eventsBox.querySelectorAll('.ev-body-wrap').forEach(wrap => {
+    const pre = wrap.querySelector('pre');
+    if(!pre) return;
+    const style = getComputedStyle(pre);
+    const lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.65);
+    const threshold = lineHeight * 20 + 20;
+    if(pre.scrollHeight > threshold){
+      wrap.classList.add('collapsible', 'collapsed');
+    }
   });
   eventsBox.querySelectorAll('.ev-body-toggle').forEach(button => {
     button.onclick = () => {
