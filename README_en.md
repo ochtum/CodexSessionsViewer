@@ -5,9 +5,7 @@
 
 # Codex Sessions Viewer
 
-A local viewer for listing and inspecting `.jsonl` files under `~/.codex/sessions`.  
-When running in WSL, if the WSL-side `~/.codex/sessions` is not found, it also auto-discovers the Windows-side location `C:\Users\<user>\.codex\sessions` (`/mnt/c/Users/<user>/.codex/sessions`).
-If sessions exist on both the WSL side and the Windows side, it loads and lists both.
+A local viewer for browsing, inspecting, and searching Codex CLI history, including sessions created from the Codex VS Code extension. You can attach labels to anything worth keeping and find it again later.
 
 - This tool supports Japanese, English, Simplified Chinese, and Traditional Chinese.
 - Feedback and feature requests are welcome via issues.
@@ -25,6 +23,10 @@ If sessions exist on both the WSL side and the Windows side, it loads and lists 
 ### Shortcut List Screen
 
 ![image](/image/00003.jpg)
+
+If this project is useful, consider giving it a star.
+
+If you want to follow updates, watching the repository also helps.
 
 ## Directory Structure
 
@@ -104,18 +106,20 @@ HOST=0.0.0.0 python3 viewer.py
   - Provides a language switcher in the upper-right: `日本語` / `English` / `简体中文` / `繁體中文`
   - Includes `Label Management`, `Show meta`, `Shortcuts`, and the mobile list toggle
   - `Show meta` is hidden by default and reveals `session root`, `path`, `cwd`, `time`, `source`, `events`, and `raw lines`
-- Left pane: session list, sorted newest first
-  - Shows a session preview, `source` labels (`CLI` / `VS Code`), session labels, `cwd`, and `id`
-  - Shows loading feedback during the initial load and manual `Reload`
+- Left pane: session list
+  - Shows a session preview, `source` labels (`CLI` / `VS Code`), session labels, and `cwd`
+  - Shows `sessions: filtered/total` above the list
+  - Lets you switch the sort order with `Newest`, `Oldest`, and `Last Updated` tabs
   - `Clear` resets all left-pane search and filter conditions
   - `Show filters` / `Hide filters` collapses or expands the search and filter area
   - In vertical layout, the header button `Hide List` / `Show List` can hide or show the entire left pane
-  - The filter area uses internal scrolling so it remains usable on smaller displays
 - Left-pane search and filters
-  - Filter by `cwd` / date / keyword / `source` / session label / event label
-  - Keyword search uses a SQLite full-text index
+  - Filter by `cwd` / `Start date` / `End date` / `Event start datetime` / `Event end datetime` / keyword / `source` / session label / event label
+  - The time field for an event datetime becomes enabled after the corresponding date is set
   - Search covers not only `message`, but also `function_call.arguments`, `function_output.output`, and `agent_update.message`
-  - `cwd`, date, `source`, and label conditions are always evaluated with AND
+  - Double quotes in the keyword field treat the enclosed text as a single phrase
+    - Example: `"Working Space"` is searched as one phrase
+  - `cwd`, datetime, `source`, and label conditions are always evaluated with AND
   - The `AND/OR` switch applies only to the keyword field
     - `AND`: must include all space-separated keywords
     - `OR`: must include at least one space-separated keyword
@@ -142,10 +146,13 @@ HOST=0.0.0.0 python3 viewer.py
   - Detail keyword search separates `Filter` from `Search`
     - `Filter`: shows only events that contain the keyword
     - `Search`: highlights matches and lets you move through them with `Prev` / `Next`
+    - Shows the hit count as `current / total`
     - `Clear search`: clears the input, filter state, and search state together
   - Matching is a literal substring match, not AND / OR parsing
   - Search targets include `message`, `function_call`, `function_output`, and `agent_update`
   - Pressing `Enter` in the detail keyword field runs the search and releases focus so you can keep navigating with `N` / `P`
+  - `Event start datetime` / `Event end datetime` can narrow the event timeline shown in the right pane
+  - Right-pane event datetime filters also use split `date + time` inputs, and the time field becomes enabled after a date is entered
   - `Selection Mode` lets you check individual `message` events and copy them together with `Copy Selected`
     - Already selected `message` events remain selected even when filters are applied
   - `Anchor Selection Mode` lets you choose one `message` event and filter the view to messages before or after that anchor
@@ -159,19 +166,22 @@ HOST=0.0.0.0 python3 viewer.py
   - Shares the same language setting as the main window
   - Manages session labels and event labels in one shared UI
   - Label colors can be entered directly as `#hex`, `rgb(...)`, or `oklch(...)`, or selected from color presets
+  - Add-label UIs keep the suggestions colorized so you can identify them more easily
 
 ## Keyboard Shortcuts
 
-Shortcuts do not run while an input is focused. Press `Esc` to close the shortcut dialog or label picker, or to leave a search field.
+Shortcuts do not run while an input is focused. Press `Esc` to close the shortcut dialog or label picker, or to move focus out of a search field.
+
+Major buttons and toggles also show their shortcut keys in tooltips.
 
 | Key | Action |
 | --- | --- |
-| `F5` | Refresh the current list or session detail |
+| `F5` | Refresh the currently visible list or the selected session detail |
 | `Shift + F` | Toggle the left-pane filters |
 | `Shift + L` | Run `Clear` on the left pane |
 | `/` | Focus the search input |
-| `N` | Move to the next detail-search match |
-| `P` | Move to the previous detail-search match |
+| `N` | Move to the next detail-search hit |
+| `P` | Move to the previous detail-search hit |
 | `M` | Toggle the `path / cwd / time` meta block |
 | `[` | Open the previous session |
 | `]` | Open the next session |
@@ -179,17 +189,17 @@ Shortcuts do not run while an input is focused. Press `Esc` to close the shortcu
 | `2` | Toggle `Only AI responses` |
 | `3` | Toggle `Only each input and final reply` |
 | `4` | Toggle `Reverse order` |
-| `Shift + D` | Clear right-pane filters and active modes |
-| `Shift + T` | Toggle detail actions |
+| `Shift + D` | Clear right-pane display filters and action state |
+| `Shift + T` | Show or hide detail actions |
 | `Shift + R` | Copy the session resume command |
 | `Shift + C` | Copy displayed messages |
 | `Shift + S` | Toggle selection mode |
 | `Shift + X` | Copy selected messages |
-| `Shift + G` | Toggle anchor mode |
+| `Shift + G` | Toggle anchor selection mode |
 | `Shift + H` | Clear the anchor |
 | `,` | Show only events before the anchor |
 | `.` | Show only events after the anchor |
-| `Esc` | Close the shortcut dialog or label picker, and leave search fields |
+| `Esc` | Close the shortcut dialog or add-label popup, and move focus out of search fields |
 
 ## Notes
 
@@ -259,7 +269,7 @@ shell:startup
 
 3. Place `CodexViewerHotkeys.ahk` in the opened folder.
 
-Now the hotkeys are enabled automatically when Windows starts.
+This enables the hotkeys automatically when Windows starts.
 
 ### 5. If Administrator Privileges Are Required
 

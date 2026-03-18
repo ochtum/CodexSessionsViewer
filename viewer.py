@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import shlex
 import sqlite3
 import threading
 import urllib.parse
@@ -19,7 +20,7 @@ MAX_EVENTS = 2000
 SEARCH_TEXT_LIMIT = 50000
 SUMMARY_SCAN_LINE_LIMIT = 400
 SEARCH_INDEX_TEXT_LIMIT = SEARCH_TEXT_LIMIT
-SEARCH_INDEX_SCHEMA_VERSION = 3
+SEARCH_INDEX_SCHEMA_VERSION = 4
 SEARCH_INDEX_DB_PATH = Path(__file__).resolve().parent / '.cache' / 'search_index.sqlite3'
 ICON_DIR = Path(__file__).resolve().parent / 'icons'
 _CACHED_SESSIONS_DIR = None
@@ -216,6 +217,19 @@ def normalize_search_text(text: str) -> str:
     return re.sub(r'\s+', ' ', text).strip().lower()
 
 
+def parse_search_query(query: str) -> list[str]:
+    """Split search query into terms, respecting double-quoted phrases.
+
+    `"Working Space"` is kept as a single term while unquoted words
+    are split on whitespace.  Falls back to simple `str.split()`
+    when quotes are unbalanced.
+    """
+    try:
+        return shlex.split(query)
+    except ValueError:
+        return query.split()
+
+
 def is_safe_css_color(value: str) -> bool:
     candidate = (value or '').strip()
     if not candidate:
@@ -347,6 +361,9 @@ def open_search_index_connection():
             conn.execute('DROP TABLE IF EXISTS session_index')
             conn.execute('DROP TABLE IF EXISTS session_label_links')
             conn.execute('DROP TABLE IF EXISTS event_label_links')
+    if 3 <= current_version < 4:
+        with conn:
+            conn.execute('DROP TABLE IF EXISTS session_index')
     conn.execute(
         '''
         CREATE TABLE IF NOT EXISTS session_index (
@@ -363,7 +380,9 @@ def open_search_index_connection():
             source TEXT NOT NULL,
             first_user_text TEXT NOT NULL,
             first_real_user_text TEXT NOT NULL,
-            search_text TEXT NOT NULL
+            search_text TEXT NOT NULL,
+            min_event_ts TEXT NOT NULL DEFAULT '',
+            max_event_ts TEXT NOT NULL DEFAULT ''
         )
         '''
     )
@@ -437,6 +456,8 @@ def summary_from_index_row(row):
         'source': row['source'],
         'first_user_text': row['first_user_text'],
         'first_real_user_text': row['first_real_user_text'],
+        'min_event_ts': row['min_event_ts'],
+        'max_event_ts': row['max_event_ts'],
     }
 
 
@@ -455,6 +476,8 @@ def build_search_index_record(path: Path, stat_result=None):
         'source': 'cli',
         'first_user_text': '',
         'first_real_user_text': '',
+        'min_event_ts': '',
+        'max_event_ts': '',
     }
     search_chunks = []
     search_len = 0
@@ -465,6 +488,12 @@ def build_search_index_record(path: Path, stat_result=None):
                 obj = json.loads(line)
                 t = obj.get('type')
                 payload = obj.get('payload', {})
+                line_ts = obj.get('timestamp', '')
+                if line_ts:
+                    if not summary['min_event_ts'] or line_ts < summary['min_event_ts']:
+                        summary['min_event_ts'] = line_ts
+                    if not summary['max_event_ts'] or line_ts > summary['max_event_ts']:
+                        summary['max_event_ts'] = line_ts
                 if t == 'session_meta':
                     summary['session_id'] = payload.get('id', '')
                     summary['started_at'] = payload.get('timestamp', '')
@@ -517,14 +546,6 @@ def build_search_index_record(path: Path, stat_result=None):
                         SEARCH_INDEX_TEXT_LIMIT,
                     )
 
-                if (
-                    SEARCH_INDEX_TEXT_LIMIT > 0
-                    and search_len >= SEARCH_INDEX_TEXT_LIMIT
-                    and summary['started_at']
-                    and summary['first_user_text']
-                    and summary['first_real_user_text']
-                ):
-                    break
     except Exception:
         pass
 
@@ -601,8 +622,9 @@ def sync_search_index(paths, prune_missing=True):
                         INSERT INTO session_index (
                             path, id, relative_path, mtime_iso, mtime_ns, size,
                             session_id, started_at, cwd, model, source,
-                            first_user_text, first_real_user_text, search_text
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            first_user_text, first_real_user_text, search_text,
+                            min_event_ts, max_event_ts
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(path) DO UPDATE SET
                             id = excluded.id,
                             relative_path = excluded.relative_path,
@@ -616,7 +638,9 @@ def sync_search_index(paths, prune_missing=True):
                             source = excluded.source,
                             first_user_text = excluded.first_user_text,
                             first_real_user_text = excluded.first_real_user_text,
-                            search_text = excluded.search_text
+                            search_text = excluded.search_text,
+                            min_event_ts = excluded.min_event_ts,
+                            max_event_ts = excluded.max_event_ts
                         ''',
                         (
                             summary['path'],
@@ -633,6 +657,8 @@ def sync_search_index(paths, prune_missing=True):
                             summary['first_user_text'],
                             summary['first_real_user_text'],
                             search_text,
+                            summary.get('min_event_ts', ''),
+                            summary.get('max_event_ts', ''),
                         ),
                     )
         finally:
@@ -644,9 +670,9 @@ def sync_search_index(paths, prune_missing=True):
     return indexed
 
 
-def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_label_id=None, event_label_id=None):
+def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_label_id=None, event_label_id=None, sort='desc'):
     normalized_terms = []
-    for term in query.split():
+    for term in parse_search_query(query):
         normalized = normalize_search_text(term)
         if normalized:
             normalized_terms.append(normalized)
@@ -655,7 +681,8 @@ def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_
         try:
             columns = (
                 'id, path, relative_path, mtime_iso, session_id, started_at, '
-                'cwd, model, source, first_user_text, first_real_user_text'
+                'cwd, model, source, first_user_text, first_real_user_text, '
+                'min_event_ts, max_event_ts'
             )
             where_clauses = []
             params = []
@@ -675,11 +702,18 @@ def fetch_sessions_from_search_index(query: str, mode: str, limit: int, session_
                 )
                 params.append(event_label_id)
             where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
+            if sort == 'updated':
+                order_sql = 'ORDER BY mtime_ns DESC'
+            else:
+                direction = 'ASC' if sort == 'asc' else 'DESC'
+                order_sql = (
+                    'ORDER BY '
+                    f"CASE WHEN started_at IS NOT NULL AND started_at <> '' THEN started_at ELSE mtime_iso END {direction}, "
+                    f'mtime_ns {direction}'
+                )
             sql = (
                 f'SELECT {columns} FROM session_index {where_sql} '
-                'ORDER BY '
-                "CASE WHEN started_at IS NOT NULL AND started_at <> '' THEN started_at ELSE mtime_iso END DESC, "
-                'mtime_ns DESC LIMIT ?'
+                f'{order_sql} LIMIT ?'
             )
             params.append(limit)
             rows = conn.execute(sql, params).fetchall()
@@ -699,7 +733,8 @@ def fetch_session_summary_from_index(path: Path):
             row = conn.execute(
                 '''
                 SELECT id, path, relative_path, mtime_iso, session_id, started_at,
-                       cwd, model, source, first_user_text, first_real_user_text
+                       cwd, model, source, first_user_text, first_real_user_text,
+                       min_event_ts, max_event_ts
                 FROM session_index
                 WHERE path = ?
                 ''',
@@ -903,6 +938,8 @@ def build_session_summary(path: Path, stat_result=None):
         'first_user_text': '',
         'first_real_user_text': '',
         'search_text': '',
+        'min_event_ts': '',
+        'max_event_ts': '',
     }
     search_chunks = []
     search_len = 0
@@ -917,6 +954,12 @@ def build_session_summary(path: Path, stat_result=None):
                 obj = json.loads(line)
                 t = obj.get('type')
                 payload = obj.get('payload', {})
+                line_ts = obj.get('timestamp', '')
+                if line_ts:
+                    if not summary['min_event_ts'] or line_ts < summary['min_event_ts']:
+                        summary['min_event_ts'] = line_ts
+                    if not summary['max_event_ts'] or line_ts > summary['max_event_ts']:
+                        summary['max_event_ts'] = line_ts
                 if t == 'session_meta':
                     summary['session_id'] = payload.get('id', '')
                     summary['started_at'] = payload.get('timestamp', '')
@@ -1112,6 +1155,7 @@ HTML_PAGE = """<!doctype html>
   --accent: #0f766e;
   --accent-strong: #0b5c57;
   --accent-soft: rgba(15, 118, 110, 0.12);
+  --accent-ring: rgba(15, 118, 110, 0.16);
   --info: #1d4ed8;
   --info-soft: rgba(29, 78, 216, 0.1);
   --support: #7c3aed;
@@ -1125,7 +1169,7 @@ HTML_PAGE = """<!doctype html>
   --dev: #b45309;
   --system: #64748b;
   --sidebar-width: 320px;
-  --font-sans: "Aptos", "Segoe UI", "Yu Gothic UI", sans-serif;
+  --font-sans: "Inter", "Noto Sans JP", "Aptos", "Segoe UI", "Yu Gothic UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --text-kicker: 10px;
   --text-label: 11px;
@@ -1207,21 +1251,21 @@ header {
 .header-main::before {
   content: "";
   position: absolute;
-  inset: -28px auto auto -18px;
+  inset: -48px auto auto -46px;
   width: 150px;
   height: 92px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(125, 211, 252, 0.22) 0%, rgba(125, 211, 252, 0) 72%);
+  background: radial-gradient(circle, rgba(125, 211, 252, 0.14) 0%, rgba(125, 211, 252, 0) 72%);
   pointer-events: none;
 }
 .header-main::after {
   content: "";
   position: absolute;
-  inset: auto -32px -40px auto;
+  inset: auto -54px -56px auto;
   width: 180px;
   height: 120px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(15, 118, 110, 0.12) 0%, rgba(15, 118, 110, 0) 74%);
+  background: radial-gradient(circle, rgba(15, 118, 110, 0.08) 0%, rgba(15, 118, 110, 0) 74%);
   pointer-events: none;
 }
 header h1 {
@@ -1402,6 +1446,28 @@ header h1 {
   min-height: 0;
   overflow: auto;
 }
+.session-count {
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  background: rgba(246, 250, 255, 0.6);
+}
+.session-count:empty {
+  display: none;
+}
+.match-counter {
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+.match-counter.hidden {
+  display: none;
+}
 .toolbar-topline,
 .detail-toolbar-topline {
   display: flex;
@@ -1501,6 +1567,257 @@ header h1 {
 .field.field-grow > input {
   width: 100%;
 }
+.datetime-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: var(--space-3);
+  align-items: center;
+}
+.datetime-split > input {
+  min-width: 0;
+}
+.datetime-split > input[type="time"] {
+  padding-right: var(--space-3);
+}
+.field-grid .datetime-split,
+.detail-event-date-row .datetime-split {
+  width: 100%;
+}
+.flatpickr-calendar {
+  font-family: var(--font-sans);
+  color: var(--text);
+  font-size: 12.5px;
+  width: 316px;
+  min-width: 316px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 252, 0.98));
+  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.16), 0 8px 20px rgba(15, 118, 110, 0.08);
+  padding: 10px 10px 8px;
+}
+.flatpickr-calendar .flatpickr-months {
+  padding: 4px 6px 10px;
+}
+.flatpickr-calendar .flatpickr-month {
+  height: 40px;
+}
+.flatpickr-calendar .flatpickr-current-month {
+  padding-top: 6px;
+}
+.flatpickr-calendar .flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-calendar .flatpickr-current-month .cur-month,
+.flatpickr-calendar .flatpickr-current-month input.cur-year {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.flatpickr-calendar .flatpickr-prev-month,
+.flatpickr-calendar .flatpickr-next-month {
+  color: #5d728d;
+  fill: #5d728d;
+  padding: 8px;
+  border-radius: 10px;
+  transition: background-color 0.18s ease, color 0.18s ease, fill 0.18s ease;
+}
+.flatpickr-calendar .flatpickr-prev-month:hover,
+.flatpickr-calendar .flatpickr-next-month:hover {
+  color: var(--accent-strong);
+  fill: var(--accent-strong);
+  background: rgba(15, 118, 110, 0.08);
+}
+.flatpickr-calendar .flatpickr-time input,
+.flatpickr-calendar .numInputWrapper span {
+  font-size: 12.5px;
+}
+.flatpickr-calendar .flatpickr-innerContainer,
+.flatpickr-calendar .flatpickr-rContainer,
+.flatpickr-calendar .flatpickr-days,
+.flatpickr-calendar .flatpickr-weekdays {
+  width: 294px;
+  min-width: 294px;
+  max-width: 294px;
+  margin: 0 auto;
+}
+.flatpickr-calendar .flatpickr-day {
+  width: 38px;
+  flex: 0 0 38px;
+  max-width: 38px;
+  height: 38px;
+  line-height: 38px;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  margin: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+.flatpickr-calendar .flatpickr-day:hover {
+  background: rgba(15, 118, 110, 0.08);
+  border-color: transparent;
+}
+.flatpickr-calendar .flatpickr-day.today {
+  border-color: rgba(15, 118, 110, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.08);
+}
+.flatpickr-calendar .flatpickr-day.selected,
+.flatpickr-calendar .flatpickr-day.startRange,
+.flatpickr-calendar .flatpickr-day.endRange {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.22);
+}
+.flatpickr-calendar .flatpickr-day.selected:hover,
+.flatpickr-calendar .flatpickr-day.startRange:hover,
+.flatpickr-calendar .flatpickr-day.endRange:hover {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #fff;
+}
+.flatpickr-calendar .flatpickr-day.prevMonthDay,
+.flatpickr-calendar .flatpickr-day.nextMonthDay,
+.flatpickr-calendar .flatpickr-day.flatpickr-disabled {
+  color: #9aa7b7;
+}
+.flatpickr-calendar .flatpickr-weekday {
+  width: 38px;
+  flex: 0 0 38px;
+  max-width: 38px;
+  margin: 0 2px;
+  color: #738295;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.flatpickr-calendar .flatpickr-weekdaycontainer,
+.flatpickr-calendar .dayContainer {
+  width: 294px;
+  min-width: 294px;
+  max-width: 294px;
+}
+.flatpickr-calendar .flatpickr-weekdays {
+  padding-bottom: 6px;
+}
+.flatpickr-calendar .flatpickr-weekdays .flatpickr-weekday:first-child {
+  color: #c35656;
+}
+.flatpickr-calendar .flatpickr-weekdays .flatpickr-weekday:last-child {
+  color: #4d79cc;
+}
+.flatpickr-calendar .dayContainer .flatpickr-day:nth-child(7n+1):not(.flatpickr-disabled):not(.selected):not(.startRange):not(.endRange):not(.inRange) {
+  color: #c35656;
+}
+.flatpickr-calendar .dayContainer .flatpickr-day:nth-child(7n):not(.flatpickr-disabled):not(.selected):not(.startRange):not(.endRange):not(.inRange) {
+  color: #4d79cc;
+}
+.flatpickr-calendar .flatpickr-rContainer {
+  padding-bottom: 6px;
+}
+.flatpickr-calendar .flatpickr-time {
+  height: 56px;
+  max-height: 56px;
+  margin-top: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(246, 250, 255, 0.92));
+  overflow: visible;
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper {
+  margin: 0 4px;
+  min-height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  overflow: visible;
+}
+.flatpickr-calendar .flatpickr-time input {
+  height: 34px;
+  line-height: 34px;
+  color: var(--text);
+  font-weight: 700;
+  background: transparent;
+}
+.flatpickr-calendar .flatpickr-time .flatpickr-time-separator {
+  color: var(--muted);
+  font-weight: 700;
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper:hover {
+  border-color: rgba(15, 118, 110, 0.24);
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper span {
+  border-left: 1px solid rgba(148, 163, 184, 0.18);
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowUp:after {
+  border-bottom-color: #64748b;
+}
+.flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowDown:after {
+  border-top-color: #64748b;
+}
+.flatpickr-calendar .flatpickr-confirm {
+  padding: 0 12px 12px;
+  border-top: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 250, 255, 0.96));
+}
+.flatpickr-calendar .flatpickr-confirm .flatpickr-confirm-button {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.22);
+}
+.flatpickr-calendar .flatpickr-confirm .flatpickr-confirm-button:hover {
+  background: linear-gradient(135deg, #11847b 0%, #0c6760 100%);
+  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.24);
+}
+.flatpickr-extra-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 250, 255, 0.96));
+}
+.flatpickr-extra-actions button.flatpickr-action {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+}
+.flatpickr-extra-actions button.flatpickr-action-secondary {
+  margin-left: auto;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(255, 255, 255, 0.96);
+  color: #334155;
+}
+.flatpickr-extra-actions button.flatpickr-action-secondary:hover:not(:disabled) {
+  border-color: rgba(15, 118, 110, 0.24);
+  color: var(--accent-strong);
+  background: #fff;
+}
+.flatpickr-extra-actions button.flatpickr-action-danger {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  box-shadow: none;
+}
+.flatpickr-extra-actions button.flatpickr-action-danger:hover:not(:disabled),
+.flatpickr-extra-actions button.flatpickr-action-danger:active:not(:disabled) {
+  color: #9f1239;
+  background: transparent;
+  transform: none;
+}
 input,
 select,
 button {
@@ -1511,7 +1828,7 @@ button {
 input:not([type="checkbox"]):not([type="radio"]),
 select {
   width: 100%;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 var(--space-5);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -1529,6 +1846,14 @@ select:focus {
   border-color: rgba(15, 118, 110, 0.46);
   box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
 }
+input:not([type="checkbox"]):not([type="radio"]):disabled,
+select:disabled {
+  background: #eef3f8;
+  color: #98a6b6;
+  border-color: #d6e0ea;
+  box-shadow: none;
+  cursor: not-allowed;
+}
 input[type="checkbox"],
 input[type="radio"] {
   width: auto;
@@ -1541,7 +1866,7 @@ input[type="radio"] {
   flex: 0 0 auto;
 }
 button {
-  min-height: 34px;
+  min-height: 36px;
   padding: 0 var(--space-5);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -1553,6 +1878,11 @@ button {
   letter-spacing: 0.01em;
   box-shadow: none;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+button:focus-visible {
+  outline: none;
+  border-color: rgba(15, 118, 110, 0.46);
+  box-shadow: 0 0 0 4px var(--accent-ring);
 }
 button:hover:not(:disabled):not(.label-remove-button) {
   transform: translateY(-1px);
@@ -1597,6 +1927,12 @@ button:disabled {
 .event-copy-button {
   background: rgba(255, 255, 255, 0.96);
   color: #334155;
+}
+#clear_detail_event_date:disabled {
+  background: rgba(255, 255, 255, 0.96);
+  color: #334155;
+  border-color: var(--line-strong);
+  opacity: 1;
 }
 .utility-action,
 .secondary-button,
@@ -1680,6 +2016,37 @@ button:disabled {
   margin: 0;
   accent-color: var(--accent);
 }
+.sort-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+}
+.sort-tab {
+  flex: 1;
+  padding: 7px 4px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sort-tab:hover {
+  color: var(--text);
+  background: rgba(15, 118, 110, 0.04);
+}
+.sort-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(15, 118, 110, 0.06);
+}
 #sessions {
   height: 100%;
   overflow-x: hidden;
@@ -1706,8 +2073,9 @@ button:disabled {
   box-shadow: var(--shadow-soft);
 }
 .session-item.active {
-  border-color: rgba(15, 118, 110, 0.28);
-  background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0.96));
+  border-color: rgba(15, 118, 110, 0.45);
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.14), rgba(15, 118, 110, 0.06));
   box-shadow: var(--shadow-medium);
 }
 .session-path {
@@ -1872,6 +2240,23 @@ button:disabled {
 .detail-toolbar-row.keyword .button-row,
 .detail-toolbar-row.range .button-row {
   grid-column: 2;
+}
+.detail-event-date-row {
+  grid-column: 2;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.detail-event-date-row .field {
+  flex: 1 1 320px;
+  max-width: 360px;
+}
+.detail-event-date-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .session-label-strip {
   min-height: 40px;
@@ -2182,6 +2567,13 @@ button:disabled {
   align-items: center;
   gap: 8px;
 }
+.label-picker-option .label-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--label-color);
+  flex: 0 0 auto;
+}
 .label-picker-empty {
   padding: 6px 8px;
   color: var(--muted);
@@ -2404,9 +2796,17 @@ pre {
   }
   .detail-toolbar-row.primary .field.inline-field,
   .detail-toolbar-row.keyword .button-row,
-  .detail-toolbar-row.range .button-row {
+  .detail-toolbar-row.range .button-row,
+  .detail-event-date-row {
     grid-column: auto;
     max-width: none;
+  }
+  .detail-event-date-row .field {
+    max-width: none;
+    flex: 1 1 100%;
+  }
+  .datetime-split {
+    grid-template-columns: 1fr;
   }
 }
 </style>
@@ -2443,7 +2843,7 @@ pre {
           <div class="toolbar-copy">候補を探してから一覧を見る、という流れに整理しました。</div>
         </div>
         <div class="toolbar-utility">
-          <button id="reload" class="primary-action">Reload</button>
+          <button id="reload" class="primary-action" title="F5">Reload</button>
           <button id="clear" class="secondary-action" title="Shift + L">Clear</button>
           <button id="toggle_filters" class="utility-action" title="Shift + F">フィルタを隠す</button>
         </div>
@@ -2486,6 +2886,20 @@ pre {
               <span>終了日</span>
               <input id="date_to" type="date" />
             </label>
+            <div class="field">
+              <span id="event_date_from_label">イベント開始日時</span>
+              <div class="datetime-split">
+                <input id="event_date_from_date" type="date" aria-label="イベント開始日時 日付" />
+                <input id="event_date_from_time" type="time" step="60" aria-label="イベント開始日時 時間" />
+              </div>
+            </div>
+            <div class="field">
+              <span id="event_date_to_label">イベント終了日時</span>
+              <div class="datetime-split">
+                <input id="event_date_to_date" type="date" aria-label="イベント終了日時 日付" />
+                <input id="event_date_to_time" type="time" step="60" aria-label="イベント終了日時 時間" />
+              </div>
+            </div>
             <label class="field">
               <span>source</span>
               <select id="source_filter">
@@ -2510,6 +2924,12 @@ pre {
         </section>
       </div>
     </div>
+    <div id="session_count" class="session-count" aria-live="polite"></div>
+    <div class="sort-tabs" role="tablist">
+      <button class="sort-tab active" data-sort="desc" role="tab" aria-selected="true">新しい順</button>
+      <button class="sort-tab" data-sort="asc" role="tab" aria-selected="false">古い順</button>
+      <button class="sort-tab" data-sort="updated" role="tab" aria-selected="false">最終更新日時順</button>
+    </div>
     <div class="content-shell">
       <div id="sessions"></div>
       <div id="sessions_status" class="status-layer hidden" aria-live="polite"></div>
@@ -2526,7 +2946,7 @@ pre {
           <div class="toggle-list">
             <label class="toggle-chip" title="1"><input type="checkbox" id="only_user_instruction" /> ユーザー指示のみ表示</label>
             <label class="toggle-chip" title="2"><input type="checkbox" id="only_ai_response" /> AIレスポンスのみ表示</label>
-            <label class="toggle-chip" title="3: 各ターンの user 入力と、その直後の最後の assistant 応答だけを表示"><input type="checkbox" id="turn_boundary_only" /> 各入力と最終応答のみ</label>
+            <label class="toggle-chip" title="3"><input type="checkbox" id="turn_boundary_only" /> 各入力と最終応答のみ</label>
             <label class="toggle-chip" title="4"><input type="checkbox" id="reverse_order" /> 表示順を逆にする</label>
           </div>
           <label class="field inline-field">
@@ -2568,7 +2988,27 @@ pre {
             <button id="detail_keyword_search" disabled>検索</button>
             <button id="detail_keyword_prev" class="secondary-action" title="P" disabled>前へ</button>
             <button id="detail_keyword_next" class="secondary-action" title="N" disabled>次へ</button>
+            <span id="detail_keyword_match_count" class="match-counter hidden"></span>
             <button id="detail_keyword_clear" class="secondary-action" disabled>検索をクリア</button>
+          </div>
+            <div class="detail-event-date-row">
+            <div class="field">
+              <span id="detail_event_date_from_label">イベント開始日時</span>
+              <div class="datetime-split">
+                <input id="detail_event_date_from_date" type="date" aria-label="詳細イベント開始日時 日付" />
+                <input id="detail_event_date_from_time" type="time" step="60" aria-label="詳細イベント開始日時 時間" />
+              </div>
+            </div>
+            <div class="field">
+              <span id="detail_event_date_to_label">イベント終了日時</span>
+              <div class="datetime-split">
+                <input id="detail_event_date_to_date" type="date" aria-label="詳細イベント終了日時 日付" />
+                <input id="detail_event_date_to_time" type="time" step="60" aria-label="詳細イベント終了日時 時間" />
+              </div>
+            </div>
+            <div class="detail-event-date-actions">
+              <button id="clear_detail_event_date" class="secondary-action">日時クリア</button>
+            </div>
           </div>
         </section>
         <section id="detail_message_range_row" class="detail-toolbar-row range">
@@ -2757,6 +3197,10 @@ const I18N = {
     'filter.copy': '期間・source・ラベルで一覧を整理します。',
     'filter.dateFrom': '開始日',
     'filter.dateTo': '終了日',
+    'filter.eventDateFrom': 'イベント開始日時',
+    'filter.eventDateTo': 'イベント終了日時',
+    'common.date': '日付',
+    'common.time': '時間',
     'filter.source': 'source',
     'filter.sessionLabel': 'セッションラベル',
     'filter.eventLabel': 'イベントラベル',
@@ -2765,6 +3209,10 @@ const I18N = {
     'filter.source.vscode': 'source: VS Code',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'filter.sort': '並び順',
+    'filter.sort.desc': '新しい順',
+    'filter.sort.asc': '古い順',
+    'filter.sort.updated': '最終更新日時順',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd (部分一致)',
@@ -2793,10 +3241,14 @@ const I18N = {
     'detail.search': '検索',
     'detail.searchKeyword': '詳細キーワード',
     'detail.searchFilter': 'フィルター',
+    'detail.searchFilterClear': 'フィルター解除',
     'detail.searchRun': '検索',
     'detail.prev': '前へ',
     'detail.next': '次へ',
     'detail.searchClear': '検索をクリア',
+    'detail.eventDateFrom': 'イベント開始日時',
+    'detail.eventDateTo': 'イベント終了日時',
+    'detail.eventDateClear': '日時クリア',
     'detail.range': '範囲選択',
     'detail.rangeMode': '起点選択モード',
     'detail.rangeModeEnd': '起点選択終了',
@@ -2839,9 +3291,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(previewなし)',
     'status.sessions.loadingTitle': 'セッション一覧を読み込み中...',
     'status.sessions.loadingCopy': '最新のセッションを確認しています。',
@@ -2867,6 +3321,9 @@ const I18N = {
     'picker.noLabels': 'ラベルがありません。先にラベル管理から作成してください。',
     'picker.removeLabel': 'ラベル解除',
     'picker.addLabel': 'ラベル追加',
+    'calendar.clear': '削除',
+    'calendar.today': '今日',
+    'calendar.confirm': 'OK',
     'copy.copied': 'コピーしました',
     'copy.displayedCount': '{count}件コピー',
     'copy.selectedCount': '{count}件コピー',
@@ -2899,6 +3356,10 @@ const I18N = {
     'filter.copy': 'Organize the list by time range, source, and labels.',
     'filter.dateFrom': 'Start date',
     'filter.dateTo': 'End date',
+    'filter.eventDateFrom': 'Event start date/time',
+    'filter.eventDateTo': 'Event end date/time',
+    'common.date': 'Date',
+    'common.time': 'Time',
     'filter.source': 'Source',
     'filter.sessionLabel': 'Session label',
     'filter.eventLabel': 'Event label',
@@ -2907,6 +3368,10 @@ const I18N = {
     'filter.source.vscode': 'source: VS Code',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'filter.sort': 'Sort order',
+    'filter.sort.desc': 'Newest first',
+    'filter.sort.asc': 'Oldest first',
+    'filter.sort.updated': 'Last updated',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd (partial match)',
@@ -2935,10 +3400,14 @@ const I18N = {
     'detail.search': 'Search',
     'detail.searchKeyword': 'Detail keyword',
     'detail.searchFilter': 'Filter',
+    'detail.searchFilterClear': 'Clear Filter',
     'detail.searchRun': 'Search',
     'detail.prev': 'Prev',
     'detail.next': 'Next',
     'detail.searchClear': 'Clear search',
+    'detail.eventDateFrom': 'Event start date/time',
+    'detail.eventDateTo': 'Event end date/time',
+    'detail.eventDateClear': 'Clear dates',
     'detail.range': 'Range',
     'detail.rangeMode': 'Anchor mode',
     'detail.rangeModeEnd': 'End anchor mode',
@@ -2981,9 +3450,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(no preview)',
     'status.sessions.loadingTitle': 'Loading sessions...',
     'status.sessions.loadingCopy': 'Checking the latest sessions.',
@@ -3009,6 +3480,9 @@ const I18N = {
     'picker.noLabels': 'No labels exist yet. Create one in Label Manager first.',
     'picker.removeLabel': 'Remove label',
     'picker.addLabel': 'Add label',
+    'calendar.clear': 'Clear',
+    'calendar.today': 'Today',
+    'calendar.confirm': 'OK',
     'copy.copied': 'Copied',
     'copy.displayedCount': 'Copied {count}',
     'copy.selectedCount': 'Copied {count}',
@@ -3041,6 +3515,10 @@ const I18N = {
     'filter.copy': '按时间范围、source 和标签整理列表。',
     'filter.dateFrom': '开始日期',
     'filter.dateTo': '结束日期',
+    'filter.eventDateFrom': '事件开始日期时间',
+    'filter.eventDateTo': '事件结束日期时间',
+    'common.date': '日期',
+    'common.time': '时间',
     'filter.source': '来源',
     'filter.sessionLabel': '会话标签',
     'filter.eventLabel': '事件标签',
@@ -3049,6 +3527,10 @@ const I18N = {
     'filter.source.vscode': 'source: VS Code',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'filter.sort': '排序',
+    'filter.sort.desc': '最新优先',
+    'filter.sort.asc': '最旧优先',
+    'filter.sort.updated': '最后更新时间',
     'filter.mode.and': 'keyword AND',
     'filter.mode.or': 'keyword OR',
     'placeholder.cwd': 'cwd（部分匹配）',
@@ -3077,10 +3559,14 @@ const I18N = {
     'detail.search': '搜索',
     'detail.searchKeyword': '详细关键词',
     'detail.searchFilter': '筛选',
+    'detail.searchFilterClear': '清除筛选',
     'detail.searchRun': '搜索',
     'detail.prev': '上一项',
     'detail.next': '下一项',
     'detail.searchClear': '清除搜索',
+    'detail.eventDateFrom': '事件开始日期时间',
+    'detail.eventDateTo': '事件结束日期时间',
+    'detail.eventDateClear': '清除日期',
     'detail.range': '范围',
     'detail.rangeMode': '锚点模式',
     'detail.rangeModeEnd': '结束锚点模式',
@@ -3123,9 +3609,11 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'summary.sessions': 'sessions: {filtered}/{total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(无预览)',
     'status.sessions.loadingTitle': '正在加载会话列表...',
     'status.sessions.loadingCopy': '正在检查最新会话。',
@@ -3151,6 +3639,9 @@ const I18N = {
     'picker.noLabels': '还没有标签。请先在标签管理中创建标签。',
     'picker.removeLabel': '移除标签',
     'picker.addLabel': '添加标签',
+    'calendar.clear': '删除',
+    'calendar.today': '今天',
+    'calendar.confirm': '确定',
     'copy.copied': '已复制',
     'copy.displayedCount': '已复制 {count} 项',
     'copy.selectedCount': '已复制 {count} 项',
@@ -3181,8 +3672,16 @@ I18N['zh-Hant'] = {
   'filter.copy': '按時間範圍、source 和標籤整理列表。',
   'filter.dateFrom': '開始日期',
   'filter.dateTo': '結束日期',
+  'filter.eventDateFrom': '事件開始日期時間',
+  'filter.eventDateTo': '事件結束日期時間',
+  'common.date': '日期',
+  'common.time': '時間',
   'filter.source': '來源',
   'filter.eventLabel': '事件標籤',
+  'filter.sort': '排序',
+  'filter.sort.desc': '最新優先',
+  'filter.sort.asc': '最舊優先',
+  'filter.sort.updated': '最後更新時間',
   'placeholder.cwd': 'cwd（部分比對）',
   'placeholder.keyword': '關鍵字篩選',
   'placeholder.detailKeyword': '詳細關鍵字',
@@ -3209,9 +3708,13 @@ I18N['zh-Hant'] = {
   'detail.searchKeyword': '詳細關鍵字',
   'detail.searchRun': '搜尋',
   'detail.searchFilter': '篩選',
+  'detail.searchFilterClear': '清除篩選',
   'detail.prev': '上一項',
   'detail.next': '下一項',
   'detail.searchClear': '清除搜尋',
+  'detail.eventDateFrom': '事件開始日期時間',
+  'detail.eventDateTo': '事件結束日期時間',
+  'detail.eventDateClear': '清除日期',
   'detail.range': '範圍',
   'detail.rangeMode': '錨點模式',
   'detail.rangeModeEnd': '結束錨點模式',
@@ -3274,6 +3777,9 @@ I18N['zh-Hant'] = {
   'picker.noLabels': '尚未有標籤。請先在標籤管理中建立標籤。',
   'picker.removeLabel': '移除標籤',
   'picker.addLabel': '新增標籤',
+  'calendar.clear': '刪除',
+  'calendar.today': '今天',
+  'calendar.confirm': '確定',
   'copy.copied': '已複製',
   'copy.displayedCount': '已複製 {count} 項',
   'copy.selectedCount': '已複製 {count} 項',
@@ -3329,6 +3835,18 @@ function setFieldLabel(inputId, value){
   }
 }
 
+function setInputAriaLabel(id, value){
+  const input = document.getElementById(id);
+  if(input){
+    input.setAttribute('aria-label', value);
+  }
+}
+
+function setDateTimePairAria(dateId, timeId, label){
+  setInputAriaLabel(dateId, `${label} ${t('common.date')}`);
+  setInputAriaLabel(timeId, `${label} ${t('common.time')}`);
+}
+
 function setToggleLabel(inputId, value){
   const input = document.getElementById(inputId);
   const label = input ? input.closest('label') : null;
@@ -3371,9 +3889,19 @@ function applyMainLanguage(){
   setText('.toolbar-section:nth-of-type(2) .toolbar-section-copy', t('filter.copy'));
   setFieldLabel('date_from', t('filter.dateFrom'));
   setFieldLabel('date_to', t('filter.dateTo'));
+  setTextById('event_date_from_label', t('filter.eventDateFrom'));
+  setTextById('event_date_to_label', t('filter.eventDateTo'));
+  setInputAriaLabel('date_from', t('filter.dateFrom'));
+  setInputAriaLabel('date_to', t('filter.dateTo'));
+  setDateTimePairAria('event_date_from_date', 'event_date_from_time', t('filter.eventDateFrom'));
+  setDateTimePairAria('event_date_to_date', 'event_date_to_time', t('filter.eventDateTo'));
   setFieldLabel('source_filter', t('filter.source'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
+  document.querySelectorAll('.sort-tab').forEach(tab => {
+    const key = 'filter.sort.' + tab.dataset.sort;
+    tab.textContent = t(key);
+  });
   document.getElementById('cwd_q').placeholder = t('placeholder.cwd');
   document.getElementById('q').placeholder = t('placeholder.keyword');
   document.getElementById('detail_keyword_q').placeholder = t('placeholder.detailKeyword');
@@ -3386,7 +3914,7 @@ function applyMainLanguage(){
   setToggleLabel('only_user_instruction', t('detail.toggle.user'));
   setToggleLabel('only_ai_response', t('detail.toggle.ai'));
   setToggleLabel('turn_boundary_only', t('detail.toggle.turn'));
-  document.getElementById('turn_boundary_only').closest('label').setAttribute('title', t('detail.toggle.turn'));
+  document.getElementById('turn_boundary_only').closest('label').setAttribute('title', '3');
   setToggleLabel('reverse_order', t('detail.toggle.reverse'));
   setFieldLabel('detail_event_label_filter', t('detail.label'));
   document.getElementById('detail_event_label_filter').setAttribute('title', t('detail.label'));
@@ -3403,6 +3931,11 @@ function applyMainLanguage(){
   setTextById('detail_keyword_prev', t('detail.prev'));
   setTextById('detail_keyword_next', t('detail.next'));
   setTextById('detail_keyword_clear', t('detail.searchClear'));
+  setTextById('detail_event_date_from_label', t('detail.eventDateFrom'));
+  setTextById('detail_event_date_to_label', t('detail.eventDateTo'));
+  setDateTimePairAria('detail_event_date_from_date', 'detail_event_date_from_time', t('detail.eventDateFrom'));
+  setDateTimePairAria('detail_event_date_to_date', 'detail_event_date_to_time', t('detail.eventDateTo'));
+  setTextById('clear_detail_event_date', t('detail.eventDateClear'));
   setText('.detail-toolbar-row.range .detail-group-title', t('detail.range'));
   setTextById('clear_message_range_selection', t('detail.rangeClear'));
   const shortcutDescriptions = [
@@ -3441,6 +3974,7 @@ function applyMainLanguage(){
   setText('.shortcut-copy', t('shortcut.copy'));
   setTextById('close_shortcuts', t('shortcut.close'));
   populateLabelControls();
+  refreshDateTimeInputPairStates();
   updateFilterVisibility();
   updateDetailActionsVisibility();
   updateDetailMetaVisibility();
@@ -3959,16 +4493,540 @@ function toTimestamp(ts){
 
 function parseOptionalDateStart(raw){
   if(!raw) return null;
-  // raw is expected as YYYY-MM-DD from <input type="date">.
-  const ts = toTimestamp(`${raw}T00:00:00`);
+  const iso = parseDateInputToIso(raw);
+  if(!iso) return null;
+  const ts = toTimestamp(`${iso}T00:00:00`);
   return Number.isNaN(ts) ? null : ts;
 }
 
 function parseOptionalDateEnd(raw){
   if(!raw) return null;
-  // Inclusive end-of-day for date-range filtering.
-  const ts = toTimestamp(`${raw}T23:59:59.999`);
+  const iso = parseDateInputToIso(raw);
+  if(!iso) return null;
+  const ts = toTimestamp(`${iso}T23:59:59.999`);
   return Number.isNaN(ts) ? null : ts;
+}
+
+function pad2(value){
+  return String(value).padStart(2, '0');
+}
+
+function parseDateInputToIso(raw){
+  if(typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if(!trimmed) return '';
+  const canonical = trimmed
+    .replace(/\u3000/g, ' ')
+    .replace(/[年月]/g, '/')
+    .replace(/日/g, ' ')
+    .replace(/[．。]/g, '.')
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ');
+  let m = canonical.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(!m){
+    m = canonical.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  }
+  if(!m){
+    m = canonical.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  }
+  if(!m){
+    return '';
+  }
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if(!Number.isFinite(year) || year < 1900 || year > 2999) return '';
+  if(!Number.isFinite(month) || month < 1 || month > 12) return '';
+  if(!Number.isFinite(day) || day < 1 || day > 31) return '';
+  const d = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if(d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day){
+    return '';
+  }
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function formatDateInputFromIso(isoValue){
+  const iso = parseDateInputToIso(isoValue);
+  if(!iso) return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m) return '';
+  return `${m[1]} / ${m[2]} / ${m[3]}`;
+}
+
+function normalizeDateInputDisplay(raw){
+  const iso = parseDateInputToIso(raw);
+  return iso ? formatDateInputFromIso(iso) : '';
+}
+
+function parseDateTimeInputToIso(raw){
+  if(typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if(!trimmed) return '';
+  const canonical = trimmed
+    .replace(/\u3000/g, ' ')
+    .replace(/[年月]/g, '/')
+    .replace(/日/g, ' ')
+    .replace(/[：]/g, ':')
+    .replace(/[．。]/g, '.')
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ');
+  let m = canonical.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::\d{2})?$/);
+  if(!m){
+    m = canonical.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2}) (\d{1,2}):(\d{2})(?::\d{1,2})?$/);
+  }
+  if(!m){
+    m = canonical.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})[ T](\d{1,2}):(\d{1,2})(?::\d{1,2})?/);
+  }
+  if(!m){
+    return '';
+  }
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  if(!Number.isFinite(year) || year < 1900 || year > 2999) return '';
+  if(!Number.isFinite(month) || month < 1 || month > 12) return '';
+  if(!Number.isFinite(day) || day < 1 || day > 31) return '';
+  if(!Number.isFinite(hour) || hour < 0 || hour > 23) return '';
+  if(!Number.isFinite(minute) || minute < 0 || minute > 59) return '';
+  const d = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if(
+    d.getFullYear() !== year ||
+    d.getMonth() !== month - 1 ||
+    d.getDate() !== day ||
+    d.getHours() !== hour ||
+    d.getMinutes() !== minute
+  ){
+    return '';
+  }
+  return `${year}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}`;
+}
+
+function formatDateTimeInputFromIso(isoValue){
+  const iso = parseDateTimeInputToIso(isoValue);
+  if(!iso) return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if(!m) return '';
+  return `${m[1]} / ${m[2]} / ${m[3]} ${m[4]}:${m[5]}`;
+}
+
+function normalizeDatetimeInputDisplay(raw){
+  const iso = parseDateTimeInputToIso(raw);
+  return iso ? formatDateTimeInputFromIso(iso) : '';
+}
+
+function parseTimeInputToValue(raw){
+  if(typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if(!trimmed) return '';
+  const canonical = trimmed
+    .replace(/[：]/g, ':')
+    .replace(/\s+/g, '');
+  const m = canonical.match(/^(\d{1,2}):(\d{2})(?::\d{1,2})?$/);
+  if(!m){
+    return '';
+  }
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if(!Number.isFinite(hour) || hour < 0 || hour > 23) return '';
+  if(!Number.isFinite(minute) || minute < 0 || minute > 59) return '';
+  return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+function buildDateTimeIsoFromParts(dateRaw, timeRaw, boundary){
+  const dateIso = parseDateInputToIso(dateRaw);
+  if(!dateIso){
+    return '';
+  }
+  const timeValue = parseTimeInputToValue(timeRaw);
+  const fallbackTime = boundary === 'end' ? '23:59' : '00:00';
+  return `${dateIso}T${timeValue || fallbackTime}`;
+}
+
+function extractTimeInputFromIso(isoValue){
+  const iso = parseDateTimeInputToIso(isoValue);
+  if(!iso) return '';
+  const m = iso.match(/T(\d{2}):(\d{2})$/);
+  if(!m) return '';
+  return `${m[1]}:${m[2]}`;
+}
+
+function applyDatePasteValue(input, raw){
+  if(!input){
+    return false;
+  }
+  const dateIso = parseDateInputToIso(raw);
+  if(!dateIso){
+    return false;
+  }
+  input.value = dateIso;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
+  if(!dateInput || !timeInput || !target){
+    return false;
+  }
+  const dateTimeIso = parseDateTimeInputToIso(raw);
+  if(dateTimeIso){
+    dateInput.value = parseDateInputToIso(dateTimeIso);
+    timeInput.value = extractTimeInputFromIso(dateTimeIso);
+    syncDateTimeInputPairState(dateInput.id, timeInput.id);
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  if(target === dateInput){
+    const dateIso = parseDateInputToIso(raw);
+    if(!dateIso){
+      return false;
+    }
+    dateInput.value = dateIso;
+    syncDateTimeInputPairState(dateInput.id, timeInput.id);
+    dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  const timeValue = parseTimeInputToValue(raw);
+  if(!timeValue || !parseDateInputToIso(dateInput.value)){
+    return false;
+  }
+  timeInput.value = timeValue;
+  syncDateTimeInputPairState(dateInput.id, timeInput.id);
+  timeInput.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function setDateTimePairFromIso(dateId, timeId, isoValue){
+  const dateInput = document.getElementById(dateId);
+  const timeInput = document.getElementById(timeId);
+  if(dateInput){
+    dateInput.value = parseDateInputToIso(isoValue);
+  }
+  if(timeInput){
+    timeInput.value = extractTimeInputFromIso(isoValue);
+  }
+  syncDateTimeInputPairState(dateId, timeId);
+}
+
+function syncDateTimeInputPairState(dateId, timeId){
+  const dateInput = document.getElementById(dateId);
+  const timeInput = document.getElementById(timeId);
+  if(!dateInput || !timeInput){
+    return;
+  }
+  const requiresActiveSession = dateId.startsWith('detail_');
+  const hasControlAccess = !requiresActiveSession || !!state.activeSession;
+  const hasDate = Boolean(parseDateInputToIso(dateInput.value));
+  if(!hasDate){
+    timeInput.value = '';
+  } else if(timeInput.value){
+    timeInput.value = parseTimeInputToValue(timeInput.value);
+  }
+  dateInput.disabled = !hasControlAccess;
+  timeInput.disabled = !hasControlAccess || !hasDate;
+}
+
+function refreshDateTimeInputPairStates(){
+  syncDateTimeInputPairState('event_date_from_date', 'event_date_from_time');
+  syncDateTimeInputPairState('event_date_to_date', 'event_date_to_time');
+  syncDateTimeInputPairState('detail_event_date_from_date', 'detail_event_date_from_time');
+  syncDateTimeInputPairState('detail_event_date_to_date', 'detail_event_date_to_time');
+}
+
+const DATETIME_INPUT_SKELETON = '0000 / 00 / 00 --:--';
+const DATETIME_INPUT_SEGMENTS = [
+  { start: 0, end: 4, fill: '0' },
+  { start: 7, end: 9, fill: '0' },
+  { start: 12, end: 14, fill: '0' },
+  { start: 15, end: 17, fill: '-' },
+  { start: 18, end: 20, fill: '-' },
+];
+
+function getDateTimeSegmentIndexByPos(pos){
+  const safePos = Number.isFinite(pos) ? pos : 0;
+  for(let i = 0; i < DATETIME_INPUT_SEGMENTS.length; i += 1){
+    const seg = DATETIME_INPUT_SEGMENTS[i];
+    if(safePos >= seg.start && safePos <= seg.end){
+      return i;
+    }
+  }
+  if(safePos < DATETIME_INPUT_SEGMENTS[0].start){
+    return 0;
+  }
+  return DATETIME_INPUT_SEGMENTS.length - 1;
+}
+
+function selectDateTimeSegment(input, index){
+  const safeIndex = Math.max(0, Math.min(DATETIME_INPUT_SEGMENTS.length - 1, index));
+  const seg = DATETIME_INPUT_SEGMENTS[safeIndex];
+  input.setSelectionRange(seg.start, seg.end);
+}
+
+function setDateTimeSegment(inputValue, index, segmentValue){
+  const seg = DATETIME_INPUT_SEGMENTS[index];
+  return inputValue.slice(0, seg.start) + segmentValue + inputValue.slice(seg.end);
+}
+
+function shiftDateTimeSegment(currentSegment, digit, fillChar){
+  const len = currentSegment.length;
+  const normalized = currentSegment.replace(/[^0-9]/g, '').padStart(len, fillChar === '-' ? '0' : fillChar).slice(-len);
+  const shifted = normalized.slice(1) + digit;
+  if(fillChar === '-'){
+    const allZero = /^0+$/.test(shifted);
+    if(allZero){
+      return '-'.repeat(len);
+    }
+  }
+  return shifted;
+}
+
+function setupDateTimeSegmentInput(input){
+  if(!input || input.dataset.segmentedReady === '1'){
+    return;
+  }
+  input.dataset.segmentedReady = '1';
+  const ensureSkeleton = () => {
+    if(!input.value){
+      input.value = DATETIME_INPUT_SKELETON;
+    }
+  };
+  input.addEventListener('focus', () => {
+    ensureSkeleton();
+    selectDateTimeSegment(input, getDateTimeSegmentIndexByPos(input.selectionStart || 0));
+  });
+  input.addEventListener('click', () => {
+    ensureSkeleton();
+    selectDateTimeSegment(input, getDateTimeSegmentIndexByPos(input.selectionStart || 0));
+  });
+  input.addEventListener('keydown', (event) => {
+    if(!/^\d$/.test(event.key) && event.key !== 'Backspace' && event.key !== 'Delete' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Tab' && event.key !== '/' && event.key !== ':' && event.key !== ' '){
+      return;
+    }
+    ensureSkeleton();
+    let segmentIndex = getDateTimeSegmentIndexByPos(input.selectionStart || 0);
+    if(/^\d$/.test(event.key)){
+      event.preventDefault();
+      const seg = DATETIME_INPUT_SEGMENTS[segmentIndex];
+      const current = input.value.slice(seg.start, seg.end);
+      const next = shiftDateTimeSegment(current, event.key, seg.fill);
+      input.value = setDateTimeSegment(input.value, segmentIndex, next);
+      selectDateTimeSegment(input, segmentIndex);
+      return;
+    }
+    if(event.key === 'Backspace' || event.key === 'Delete'){
+      event.preventDefault();
+      const seg = DATETIME_INPUT_SEGMENTS[segmentIndex];
+      input.value = setDateTimeSegment(input.value, segmentIndex, seg.fill.repeat(seg.end - seg.start));
+      selectDateTimeSegment(input, segmentIndex);
+      return;
+    }
+    if(event.key === 'ArrowLeft'){
+      event.preventDefault();
+      selectDateTimeSegment(input, Math.max(0, segmentIndex - 1));
+      return;
+    }
+    if(event.key === 'ArrowRight' || event.key === '/' || event.key === ':' || event.key === ' '){
+      event.preventDefault();
+      selectDateTimeSegment(input, Math.min(DATETIME_INPUT_SEGMENTS.length - 1, segmentIndex + 1));
+      return;
+    }
+    if(event.key === 'Tab'){
+      if(event.shiftKey){
+        selectDateTimeSegment(input, Math.max(0, segmentIndex - 1));
+      } else {
+        selectDateTimeSegment(input, Math.min(DATETIME_INPUT_SEGMENTS.length - 1, segmentIndex + 1));
+      }
+    }
+  });
+  input.addEventListener('blur', () => {
+    const display = normalizeDatetimeInputDisplay(input.value);
+    if(display){
+      input.value = display;
+      return;
+    }
+  if(input.value === DATETIME_INPUT_SKELETON){
+      input.value = '';
+    }
+  });
+  input.addEventListener('input', (event) => {
+    if(event && typeof event.inputType === 'string' && event.inputType !== 'insertFromPaste'){
+      return;
+    }
+    const iso = parseDateTimeInputToIso(input.value || '');
+    if(!iso){
+      return;
+    }
+    input.value = formatDateTimeInputFromIso(iso);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  input.addEventListener('paste', (event) => {
+    const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+    const iso = parseDateTimeInputToIso(text || '');
+    if(iso){
+      event.preventDefault();
+      input.value = formatDateTimeInputFromIso(iso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    // Some environments do not expose clipboardData; normalize after default paste.
+    setTimeout(() => {
+      const fallbackIso = parseDateTimeInputToIso(input.value || '');
+      if(!fallbackIso){
+        return;
+      }
+      input.value = formatDateTimeInputFromIso(fallbackIso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 0);
+  });
+}
+
+const DATE_INPUT_SKELETON = '0000 / 00 / 00';
+const DATE_INPUT_SEGMENTS = [
+  { start: 0, end: 4, fill: '0' },
+  { start: 7, end: 9, fill: '0' },
+  { start: 12, end: 14, fill: '0' },
+];
+
+function getDateSegmentIndexByPos(pos){
+  const safePos = Number.isFinite(pos) ? pos : 0;
+  for(let i = 0; i < DATE_INPUT_SEGMENTS.length; i += 1){
+    const seg = DATE_INPUT_SEGMENTS[i];
+    if(safePos >= seg.start && safePos <= seg.end){
+      return i;
+    }
+  }
+  if(safePos < DATE_INPUT_SEGMENTS[0].start){
+    return 0;
+  }
+  return DATE_INPUT_SEGMENTS.length - 1;
+}
+
+function selectDateSegment(input, index){
+  const safeIndex = Math.max(0, Math.min(DATE_INPUT_SEGMENTS.length - 1, index));
+  const seg = DATE_INPUT_SEGMENTS[safeIndex];
+  input.setSelectionRange(seg.start, seg.end);
+}
+
+function setDateSegment(inputValue, index, segmentValue){
+  const seg = DATE_INPUT_SEGMENTS[index];
+  return inputValue.slice(0, seg.start) + segmentValue + inputValue.slice(seg.end);
+}
+
+function setupDateSegmentInput(input){
+  if(!input || input.dataset.segmentedDateReady === '1'){
+    return;
+  }
+  input.dataset.segmentedDateReady = '1';
+  const ensureSkeleton = () => {
+    if(!input.value){
+      input.value = DATE_INPUT_SKELETON;
+    }
+  };
+  input.addEventListener('focus', () => {
+    ensureSkeleton();
+    selectDateSegment(input, getDateSegmentIndexByPos(input.selectionStart || 0));
+  });
+  input.addEventListener('click', () => {
+    ensureSkeleton();
+    selectDateSegment(input, getDateSegmentIndexByPos(input.selectionStart || 0));
+  });
+  input.addEventListener('keydown', (event) => {
+    if(!/^\d$/.test(event.key) && event.key !== 'Backspace' && event.key !== 'Delete' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Tab' && event.key !== '/' && event.key !== ' '){
+      return;
+    }
+    ensureSkeleton();
+    const segmentIndex = getDateSegmentIndexByPos(input.selectionStart || 0);
+    if(/^\d$/.test(event.key)){
+      event.preventDefault();
+      const seg = DATE_INPUT_SEGMENTS[segmentIndex];
+      const current = input.value.slice(seg.start, seg.end);
+      const next = shiftDateTimeSegment(current, event.key, seg.fill);
+      input.value = setDateSegment(input.value, segmentIndex, next);
+      selectDateSegment(input, segmentIndex);
+      return;
+    }
+    if(event.key === 'Backspace' || event.key === 'Delete'){
+      event.preventDefault();
+      const seg = DATE_INPUT_SEGMENTS[segmentIndex];
+      input.value = setDateSegment(input.value, segmentIndex, seg.fill.repeat(seg.end - seg.start));
+      selectDateSegment(input, segmentIndex);
+      return;
+    }
+    if(event.key === 'ArrowLeft'){
+      event.preventDefault();
+      selectDateSegment(input, Math.max(0, segmentIndex - 1));
+      return;
+    }
+    if(event.key === 'ArrowRight' || event.key === '/' || event.key === ' '){
+      event.preventDefault();
+      selectDateSegment(input, Math.min(DATE_INPUT_SEGMENTS.length - 1, segmentIndex + 1));
+      return;
+    }
+    if(event.key === 'Tab'){
+      if(event.shiftKey){
+        selectDateSegment(input, Math.max(0, segmentIndex - 1));
+      } else {
+        selectDateSegment(input, Math.min(DATE_INPUT_SEGMENTS.length - 1, segmentIndex + 1));
+      }
+    }
+  });
+  input.addEventListener('blur', () => {
+    const display = normalizeDateInputDisplay(input.value);
+    if(display){
+      input.value = display;
+      return;
+    }
+    if(input.value === DATE_INPUT_SKELETON){
+      input.value = '';
+    }
+  });
+  input.addEventListener('input', (event) => {
+    if(event && typeof event.inputType === 'string' && event.inputType !== 'insertFromPaste'){
+      return;
+    }
+    const iso = parseDateInputToIso(input.value || '');
+    if(!iso){
+      return;
+    }
+    input.value = formatDateInputFromIso(iso);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  input.addEventListener('paste', (event) => {
+    const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+    const iso = parseDateInputToIso(text || '');
+    if(iso){
+      event.preventDefault();
+      input.value = formatDateInputFromIso(iso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    setTimeout(() => {
+      const fallbackIso = parseDateInputToIso(input.value || '');
+      if(!fallbackIso){
+        return;
+      }
+      input.value = formatDateInputFromIso(fallbackIso);
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 0);
+  });
+}
+
+function parseOptionalDatetimeStart(raw){
+  if(!raw) return null;
+  const iso = parseDateTimeInputToIso(raw);
+  if(!iso) return null;
+  const ts = toTimestamp(iso);
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function parseOptionalDatetimeEnd(raw){
+  if(!raw) return null;
+  const iso = parseDateTimeInputToIso(raw);
+  if(!iso) return null;
+  const ts = toTimestamp(iso);
+  if(Number.isNaN(ts)) return null;
+  return ts + 59999;
 }
 
 function getActiveSessionId(){
@@ -4157,13 +5215,26 @@ function updateDetailKeywordControls(searchMeta){
   const hasSearchMatches = searchTotal > 0;
   const hasKeywordState = hasInputValue || detailKeywordFilterTerm !== '' || detailKeywordSearchTerm !== '';
   input.disabled = !hasActiveSession;
-  filterButton.disabled = !hasActiveSession || !hasInputValue;
+  const hasActiveFilter = detailKeywordFilterTerm !== '';
+  filterButton.disabled = !hasActiveSession || (!hasInputValue && !hasActiveFilter);
   searchButton.disabled = !hasActiveSession || !hasInputValue;
   prevButton.disabled = !hasSearchMatches;
   nextButton.disabled = !hasSearchMatches;
   clearButton.disabled = !hasKeywordState;
-  filterButton.classList.toggle('active', hasActiveSession && detailKeywordFilterTerm !== '');
+  filterButton.classList.toggle('active', hasActiveSession && hasActiveFilter);
+  filterButton.textContent = hasActiveFilter ? t('detail.searchFilterClear') : t('detail.searchFilter');
   searchButton.classList.toggle('active', hasActiveSession && detailKeywordSearchTerm !== '');
+  const matchCountEl = document.getElementById('detail_keyword_match_count');
+  if(matchCountEl){
+    if(hasSearchMatches){
+      const current = detailKeywordCurrentMatchIndex >= 0 ? detailKeywordCurrentMatchIndex + 1 : 0;
+      matchCountEl.textContent = t('detail.matchCounter', { current: current, total: searchTotal });
+      matchCountEl.classList.remove('hidden');
+    } else {
+      matchCountEl.textContent = '';
+      matchCountEl.classList.add('hidden');
+    }
+  }
   updateClearDetailButtonState();
 }
 
@@ -4183,6 +5254,12 @@ function updateDetailDisplayControlsState(){
   const detailEventLabelFilter = document.getElementById('detail_event_label_filter');
   if(detailEventLabelFilter){
     detailEventLabelFilter.disabled = !hasActiveSession;
+  }
+  syncDateTimeInputPairState('detail_event_date_from_date', 'detail_event_date_from_time');
+  syncDateTimeInputPairState('detail_event_date_to_date', 'detail_event_date_to_time');
+  const clearDetailEventDateButton = document.getElementById('clear_detail_event_date');
+  if(clearDetailEventDateButton){
+    clearDetailEventDateButton.disabled = !hasActiveSession || !hasDetailEventDateFilter();
   }
 }
 
@@ -4472,7 +5549,20 @@ function hasDetailFilter(){
     state.isEventSelectionMode ||
     ((state.selectedEventIds && state.selectedEventIds.size) || 0) > 0 ||
     state.isMessageRangeSelectionMode ||
-    state.selectedMessageRangeEventId
+    state.selectedMessageRangeEventId ||
+    document.getElementById('detail_event_date_from_date').value ||
+    document.getElementById('detail_event_date_from_time').value ||
+    document.getElementById('detail_event_date_to_date').value ||
+    document.getElementById('detail_event_date_to_time').value
+  );
+}
+
+function hasDetailEventDateFilter(){
+  return Boolean(
+    document.getElementById('detail_event_date_from_date').value ||
+    document.getElementById('detail_event_date_from_time').value ||
+    document.getElementById('detail_event_date_to_date').value ||
+    document.getElementById('detail_event_date_to_time').value
   );
 }
 
@@ -4489,6 +5579,10 @@ function hasListFilter(){
     document.getElementById('cwd_q').value.trim() ||
     document.getElementById('date_from').value ||
     document.getElementById('date_to').value ||
+    document.getElementById('event_date_from_date').value ||
+    document.getElementById('event_date_from_time').value ||
+    document.getElementById('event_date_to_date').value ||
+    document.getElementById('event_date_to_time').value ||
     document.getElementById('q').value.trim() ||
     normalizeSourceFilter(document.getElementById('source_filter').value || 'all') !== 'all' ||
     getSelectedSessionLabelFilter() ||
@@ -4527,6 +5621,19 @@ function normalizeRequestError(error, fallback){
   return fallback;
 }
 
+function getActiveSortOrder(){
+  const active = document.querySelector('.sort-tab.active');
+  return active ? active.dataset.sort : 'desc';
+}
+
+function setActiveSortOrder(value){
+  document.querySelectorAll('.sort-tab').forEach(tab => {
+    const isActive = tab.dataset.sort === value;
+    tab.classList.toggle('active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+}
+
 async function loadSessions(options){
   saveFilters();
   const requestId = ++loadSessionsRequestSeq;
@@ -4549,6 +5656,10 @@ async function loadSessions(options){
   }
   if(eventLabelId){
     params.set('event_label_id', eventLabelId);
+  }
+  const sortOrder = getActiveSortOrder();
+  if(sortOrder && sortOrder !== 'desc'){
+    params.set('sort', sortOrder);
   }
   try {
     const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
@@ -4611,13 +5722,43 @@ async function loadSessions(options){
 }
 
 function saveFilters(){
+  const dateFromIso = parseDateInputToIso(document.getElementById('date_from').value);
+  const dateToIso = parseDateInputToIso(document.getElementById('date_to').value);
+  const eventDateFromDate = parseDateInputToIso(document.getElementById('event_date_from_date').value);
+  const eventDateFromTime = parseTimeInputToValue(document.getElementById('event_date_from_time').value);
+  const eventDateToDate = parseDateInputToIso(document.getElementById('event_date_to_date').value);
+  const eventDateToTime = parseTimeInputToValue(document.getElementById('event_date_to_time').value);
+  const detailEventDateFromDate = parseDateInputToIso(document.getElementById('detail_event_date_from_date').value);
+  const detailEventDateFromTime = parseTimeInputToValue(document.getElementById('detail_event_date_from_time').value);
+  const detailEventDateToDate = parseDateInputToIso(document.getElementById('detail_event_date_to_date').value);
+  const detailEventDateToTime = parseTimeInputToValue(document.getElementById('detail_event_date_to_time').value);
+  const eventDateFromIso = buildDateTimeIsoFromParts(eventDateFromDate, eventDateFromTime, 'start');
+  const eventDateToIso = buildDateTimeIsoFromParts(eventDateToDate, eventDateToTime, 'end');
+  const detailEventDateFromIso = buildDateTimeIsoFromParts(detailEventDateFromDate, detailEventDateFromTime, 'start');
+  const detailEventDateToIso = buildDateTimeIsoFromParts(detailEventDateToDate, detailEventDateToTime, 'end');
+  document.getElementById('date_from').value = dateFromIso;
+  document.getElementById('date_to').value = dateToIso;
+  document.getElementById('event_date_from_date').value = eventDateFromDate;
+  document.getElementById('event_date_from_time').value = eventDateFromTime;
+  document.getElementById('event_date_to_date').value = eventDateToDate;
+  document.getElementById('event_date_to_time').value = eventDateToTime;
+  document.getElementById('detail_event_date_from_date').value = detailEventDateFromDate;
+  document.getElementById('detail_event_date_from_time').value = detailEventDateFromTime;
+  document.getElementById('detail_event_date_to_date').value = detailEventDateToDate;
+  document.getElementById('detail_event_date_to_time').value = detailEventDateToTime;
+  refreshDateTimeInputPairStates();
   const payload = {
     cwd_q: document.getElementById('cwd_q').value,
-    date_from: document.getElementById('date_from').value,
-    date_to: document.getElementById('date_to').value,
+    date_from: dateFromIso,
+    date_to: dateToIso,
+    event_date_from_date: eventDateFromDate,
+    event_date_from_time: eventDateFromTime,
+    event_date_to_date: eventDateToDate,
+    event_date_to_time: eventDateToTime,
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
+    sort_order: getActiveSortOrder(),
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
     detail_event_label_filter: getSelectedDetailEventLabelFilter(),
@@ -4643,15 +5784,29 @@ function restoreFilters(){
   try {
     const data = JSON.parse(raw);
     if(typeof data.cwd_q === 'string') document.getElementById('cwd_q').value = data.cwd_q;
-    if(typeof data.date_from === 'string') document.getElementById('date_from').value = data.date_from;
-    if(typeof data.date_to === 'string') document.getElementById('date_to').value = data.date_to;
+    if(typeof data.date_from === 'string') document.getElementById('date_from').value = parseDateInputToIso(data.date_from);
+    if(typeof data.date_to === 'string') document.getElementById('date_to').value = parseDateInputToIso(data.date_to);
+    if(typeof data.event_date_from_date === 'string' || typeof data.event_date_from_time === 'string'){
+      document.getElementById('event_date_from_date').value = parseDateInputToIso(data.event_date_from_date);
+      document.getElementById('event_date_from_time').value = parseTimeInputToValue(data.event_date_from_time);
+    } else if(typeof data.event_date_from === 'string'){
+      setDateTimePairFromIso('event_date_from_date', 'event_date_from_time', data.event_date_from);
+    }
+    if(typeof data.event_date_to_date === 'string' || typeof data.event_date_to_time === 'string'){
+      document.getElementById('event_date_to_date').value = parseDateInputToIso(data.event_date_to_date);
+      document.getElementById('event_date_to_time').value = parseTimeInputToValue(data.event_date_to_time);
+    } else if(typeof data.event_date_to === 'string'){
+      setDateTimePairFromIso('event_date_to_date', 'event_date_to_time', data.event_date_to);
+    }
     if(typeof data.q === 'string') document.getElementById('q').value = data.q;
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
     document.getElementById('source_filter').value = source;
+    if(data.sort_order === 'asc' || data.sort_order === 'desc' || data.sort_order === 'updated') setActiveSortOrder(data.sort_order);
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
+    refreshDateTimeInputPairStates();
     if(typeof data.filters_visible === 'boolean') filtersVisible = data.filters_visible;
     if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
     if(typeof data.left_pane_visible === 'boolean') leftPaneVisible = data.left_pane_visible;
@@ -4665,17 +5820,19 @@ function clearFilters(){
   document.getElementById('cwd_q').value = '';
   document.getElementById('date_from').value = '';
   document.getElementById('date_to').value = '';
+  document.getElementById('event_date_from_date').value = '';
+  document.getElementById('event_date_from_time').value = '';
+  document.getElementById('event_date_to_date').value = '';
+  document.getElementById('event_date_to_time').value = '';
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
+  setActiveSortOrder('desc');
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
   document.getElementById('detail_event_label_filter').value = '';
-  try {
-    localStorage.removeItem(FILTER_STORAGE_KEY);
-  } catch (e) {
-    // Ignore storage delete errors.
-  }
+  refreshDateTimeInputPairStates();
+  saveFilters();
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
@@ -4690,6 +5847,18 @@ function applyFilter(){
   const toRaw = document.getElementById('date_to').value;
   const fromTs = parseOptionalDateStart(fromRaw);
   const toTs = parseOptionalDateEnd(toRaw);
+  const evFromRaw = buildDateTimeIsoFromParts(
+    document.getElementById('event_date_from_date').value,
+    document.getElementById('event_date_from_time').value,
+    'start'
+  );
+  const evToRaw = buildDateTimeIsoFromParts(
+    document.getElementById('event_date_to_date').value,
+    document.getElementById('event_date_to_time').value,
+    'end'
+  );
+  const evFromTs = parseOptionalDatetimeStart(evFromRaw);
+  const evToTs = parseOptionalDatetimeEnd(evToRaw);
   state.filtered = state.sessions.filter(s => {
     const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
     const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
@@ -4709,7 +5878,23 @@ function applyFilter(){
       }
     }
 
-    return cwdMatched && sourceMatched && dateMatched;
+    let eventDateMatched = true;
+    if(evFromTs !== null || evToTs !== null){
+      const minTs = s.min_event_ts ? toTimestamp(s.min_event_ts) : NaN;
+      const maxTs = s.max_event_ts ? toTimestamp(s.max_event_ts) : NaN;
+      if(Number.isNaN(minTs) || Number.isNaN(maxTs)){
+        eventDateMatched = false;
+      } else {
+        if(evFromTs !== null && maxTs < evFromTs){
+          eventDateMatched = false;
+        }
+        if(evToTs !== null && minTs > evToTs){
+          eventDateMatched = false;
+        }
+      }
+    }
+
+    return cwdMatched && sourceMatched && dateMatched && eventDateMatched;
   });
   saveFilters();
   renderSessionList();
@@ -4757,7 +5942,7 @@ function renderSessionList(){
       </div>
     `).join('');
   }
-  if(state.isSessionsLoading && state.hasLoadedSessions && state.sessionsLoadMode === 'reload'){
+  if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
     setStatusLayer(
       'sessions_status',
       t('status.sessions.refreshTitle'),
@@ -4770,6 +5955,14 @@ function renderSessionList(){
   box.querySelectorAll('.session-item').forEach(el => {
     el.onclick = () => openSession(el.dataset.path);
   });
+  const countEl = document.getElementById('session_count');
+  if(countEl){
+    if(state.hasLoadedSessions && state.sessions.length > 0){
+      countEl.textContent = t('summary.sessions', { filtered: state.filtered.length, total: state.sessions.length });
+    } else {
+      countEl.textContent = '';
+    }
+  }
 }
 
 function getDisplayEvents(){
@@ -4817,6 +6010,27 @@ function getDisplayEvents(){
   }
   if(detailKeywordFilterTerm !== ''){
     events = events.filter(ev => containsLiteralKeyword(getEventBodyText(ev), detailKeywordFilterTerm));
+  }
+  const detailEvFromRaw = buildDateTimeIsoFromParts(
+    document.getElementById('detail_event_date_from_date').value,
+    document.getElementById('detail_event_date_from_time').value,
+    'start'
+  );
+  const detailEvToRaw = buildDateTimeIsoFromParts(
+    document.getElementById('detail_event_date_to_date').value,
+    document.getElementById('detail_event_date_to_time').value,
+    'end'
+  );
+  const detailEvFromTs = parseOptionalDatetimeStart(detailEvFromRaw);
+  const detailEvToTs = parseOptionalDatetimeEnd(detailEvToRaw);
+  if(detailEvFromTs !== null || detailEvToTs !== null){
+    events = events.filter(ev => {
+      const evTs = ev.timestamp ? toTimestamp(ev.timestamp) : NaN;
+      if(Number.isNaN(evTs)) return false;
+      if(detailEvFromTs !== null && evTs < detailEvFromTs) return false;
+      if(detailEvToTs !== null && evTs > detailEvToTs) return false;
+      return true;
+    });
   }
   if(document.getElementById('reverse_order').checked){
     events = [...events].reverse();
@@ -4999,7 +6213,11 @@ function clearDetailMessageRangeSelection(){
 
 function applyDetailKeywordFilter(){
   noteDetailInteraction();
-  detailKeywordFilterTerm = getDetailKeywordInputValue();
+  if(detailKeywordFilterTerm !== ''){
+    detailKeywordFilterTerm = '';
+  } else {
+    detailKeywordFilterTerm = getDetailKeywordInputValue();
+  }
   const eventsBox = document.getElementById('events');
   if(eventsBox){
     eventsBox.scrollTop = 0;
@@ -5059,6 +6277,11 @@ function clearDetailFilters(){
   if(detailKeywordInput){
     detailKeywordInput.value = '';
   }
+  document.getElementById('detail_event_date_from_date').value = '';
+  document.getElementById('detail_event_date_from_time').value = '';
+  document.getElementById('detail_event_date_to_date').value = '';
+  document.getElementById('detail_event_date_to_time').value = '';
+  refreshDateTimeInputPairStates();
   resetDetailKeywordState();
   state.isEventSelectionMode = false;
   clearSelectedEventIds();
@@ -5435,40 +6658,132 @@ function moveDetailKeywordSearchByShortcut(step){
   return true;
 }
 
-document.getElementById('cwd_q').addEventListener('input', applyFilter);
-document.getElementById('date_from').addEventListener('change', applyFilter);
-document.getElementById('date_to').addEventListener('change', applyFilter);
-document.getElementById('q').addEventListener('input', scheduleLoadSessions);
-document.getElementById('mode').addEventListener('change', scheduleLoadSessions);
-document.getElementById('source_filter').addEventListener('change', applyFilter);
-document.getElementById('session_label_filter').addEventListener('change', scheduleLoadSessions);
-document.getElementById('event_label_filter').addEventListener('change', scheduleLoadSessions);
-document.getElementById('detail_event_label_filter').addEventListener('change', () => {
+function safeBindById(id, eventName, handler){
+  const node = document.getElementById(id);
+  if(!node){
+    return;
+  }
+  node.addEventListener(eventName, handler);
+}
+
+function bindDateTimePairChange(dateId, timeId, handler){
+  const run = () => {
+    syncDateTimeInputPairState(dateId, timeId);
+    handler();
+  };
+  safeBindById(dateId, 'change', run);
+  safeBindById(timeId, 'change', run);
+}
+
+function bindDatePaste(id){
+  const input = document.getElementById(id);
+  if(!input || input.dataset.datePasteReady === '1'){
+    return;
+  }
+  input.dataset.datePasteReady = '1';
+  input.addEventListener('paste', (event) => {
+    const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+    if(text && applyDatePasteValue(input, text)){
+      event.preventDefault();
+      return;
+    }
+    setTimeout(() => {
+      applyDatePasteValue(input, input.value || '');
+    }, 0);
+  });
+}
+
+function bindDateTimePairPaste(dateId, timeId){
+  const dateInput = document.getElementById(dateId);
+  const timeInput = document.getElementById(timeId);
+  if(!dateInput || !timeInput){
+    return;
+  }
+  const bindPaste = (input) => {
+    if(!input || input.dataset.dateTimePasteReady === '1'){
+      return;
+    }
+    input.dataset.dateTimePasteReady = '1';
+    input.addEventListener('paste', (event) => {
+      const text = event.clipboardData ? event.clipboardData.getData('text') : '';
+      if(text && applyDateTimePairPasteValue(dateInput, timeInput, input, text)){
+        event.preventDefault();
+        return;
+      }
+      setTimeout(() => {
+        applyDateTimePairPasteValue(dateInput, timeInput, input, input.value || '');
+      }, 0);
+    });
+  };
+  bindPaste(dateInput);
+  bindPaste(timeInput);
+}
+
+safeBindById('cwd_q', 'input', applyFilter);
+safeBindById('date_from', 'change', applyFilter);
+safeBindById('date_to', 'change', applyFilter);
+bindDateTimePairChange('event_date_from_date', 'event_date_from_time', applyFilter);
+bindDateTimePairChange('event_date_to_date', 'event_date_to_time', applyFilter);
+bindDatePaste('date_from');
+bindDatePaste('date_to');
+bindDateTimePairPaste('event_date_from_date', 'event_date_from_time');
+bindDateTimePairPaste('event_date_to_date', 'event_date_to_time');
+safeBindById('q', 'input', scheduleLoadSessions);
+safeBindById('mode', 'change', scheduleLoadSessions);
+safeBindById('source_filter', 'change', applyFilter);
+document.querySelectorAll('.sort-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    setActiveSortOrder(tab.dataset.sort);
+    scheduleLoadSessions();
+  });
+});
+safeBindById('session_label_filter', 'change', scheduleLoadSessions);
+safeBindById('event_label_filter', 'change', scheduleLoadSessions);
+safeBindById('detail_event_label_filter', 'change', () => {
   saveFilters();
   renderActiveSession();
 });
-document.getElementById('toggle_filters').addEventListener('click', () => {
+bindDateTimePairChange('detail_event_date_from_date', 'detail_event_date_from_time', () => {
+  saveFilters();
+  renderActiveSession();
+});
+bindDateTimePairChange('detail_event_date_to_date', 'detail_event_date_to_time', () => {
+  saveFilters();
+  renderActiveSession();
+});
+bindDateTimePairPaste('detail_event_date_from_date', 'detail_event_date_from_time');
+bindDateTimePairPaste('detail_event_date_to_date', 'detail_event_date_to_time');
+safeBindById('clear_detail_event_date', 'click', () => {
+  document.getElementById('detail_event_date_from_date').value = '';
+  document.getElementById('detail_event_date_from_time').value = '';
+  document.getElementById('detail_event_date_to_date').value = '';
+  document.getElementById('detail_event_date_to_time').value = '';
+  refreshDateTimeInputPairStates();
+  saveFilters();
+  renderActiveSession();
+});
+safeBindById('toggle_filters', 'click', () => {
   setFiltersVisible(!filtersVisible);
 });
-document.getElementById('toggle_session_list_mobile').addEventListener('click', () => {
+safeBindById('toggle_session_list_mobile', 'click', () => {
   setLeftPaneVisible(!leftPaneVisible);
 });
-document.getElementById('toggle_detail_actions').addEventListener('click', () => {
+safeBindById('toggle_detail_actions', 'click', () => {
   setDetailActionsVisible(!detailActionsVisible);
 });
-document.getElementById('open_shortcuts').addEventListener('click', openShortcutDialog);
-document.getElementById('close_shortcuts').addEventListener('click', closeShortcutDialog);
-document.getElementById('toggle_meta').addEventListener('click', () => {
+safeBindById('open_shortcuts', 'click', openShortcutDialog);
+safeBindById('close_shortcuts', 'click', closeShortcutDialog);
+safeBindById('toggle_meta', 'click', () => {
   setDetailMetaVisible(!detailMetaVisible);
 });
-document.getElementById('reload').addEventListener('click', () => {
+safeBindById('reload', 'click', () => {
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
   }
   loadSessions({ mode: 'reload' });
 });
-document.getElementById('clear').addEventListener('click', clearFilters);
+safeBindById('clear', 'click', clearFilters);
 document.getElementById('only_user_instruction').addEventListener('change', () => {
   renderActiveSession();
 });
@@ -5504,6 +6819,7 @@ document.getElementById('language_select').addEventListener('change', (event) =>
 document.getElementById('detail_keyword_q').addEventListener('keydown', (event) => {
   if(event.key === 'Enter' && !event.isComposing){
     event.preventDefault();
+    detailKeywordFilterTerm = getDetailKeywordInputValue();
     runDetailKeywordSearch();
     releaseSearchFocus();
   }
@@ -6959,10 +8275,13 @@ class Handler(BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(parsed.query)
             raw_query = q.get('q', [''])[0].strip()
             mode = q.get('mode', ['and'])[0].strip().lower()
+            sort = q.get('sort', ['desc'])[0].strip().lower()
             session_label_id = parse_optional_int(q.get('session_label_id', [''])[0])
             event_label_id = parse_optional_int(q.get('event_label_id', [''])[0])
             if mode not in ('and', 'or'):
                 mode = 'and'
+            if sort not in ('asc', 'desc', 'updated'):
+                sort = 'desc'
             files = iter_all_session_files(roots)
             sync_search_index(files, prune_missing=True)
             sessions = fetch_sessions_from_search_index(
@@ -6971,6 +8290,7 @@ class Handler(BaseHTTPRequestHandler):
                 MAX_LIST,
                 session_label_id=session_label_id,
                 event_label_id=event_label_id,
+                sort=sort,
             )
             self._send_json({'root': ' | '.join(str(x) for x in roots), 'sessions': sessions})
             return
