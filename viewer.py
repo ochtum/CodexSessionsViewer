@@ -1611,34 +1611,34 @@ header h1 {
   background: #f1f5f9;
 }
 .seg-wrap input.seg {
-  border: 0 !important;
-  outline: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
   text-align: center;
   font-family: var(--font-mono, monospace);
   font-size: var(--text-body);
   font-weight: 600;
   color: var(--text);
-  padding: 0 !important;
+  padding: 0;
   line-height: 32px;
-  height: 32px !important;
-  min-height: 32px !important;
+  height: 32px;
+  min-height: 32px;
   box-sizing: border-box;
-  border-radius: 0 !important;
+  border-radius: 0;
 }
 .seg-wrap input.seg::placeholder {
   color: #94a3b8;
   font-weight: 400;
 }
 .seg-wrap input.seg:focus {
-  background: transparent !important;
+  background: transparent;
 }
-.seg-wrap input.seg-y { width: 40px !important; }
+.seg-wrap input.seg-y { width: 40px; }
 .seg-wrap input.seg-m,
 .seg-wrap input.seg-d,
 .seg-wrap input.seg-h,
-.seg-wrap input.seg-mi { width: 26px !important; }
+.seg-wrap input.seg-mi { width: 26px; }
 .seg-wrap .seg-sep {
   color: #94a3b8;
   font-size: var(--text-body);
@@ -1924,7 +1924,7 @@ button {
   font-size: var(--text-body);
   line-height: 1.4;
 }
-input:not([type="checkbox"]):not([type="radio"]),
+input:not([type="checkbox"]):not([type="radio"]):not(.seg),
 select {
   width: 100%;
   min-height: 40px;
@@ -1936,16 +1936,16 @@ select {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
-input:not([type="checkbox"]):not([type="radio"])::placeholder {
+input:not([type="checkbox"]):not([type="radio"]):not(.seg)::placeholder {
   color: #95a3b3;
 }
-input:not([type="checkbox"]):not([type="radio"]):focus,
+input:not([type="checkbox"]):not([type="radio"]):not(.seg):focus,
 select:focus {
   outline: none;
   border-color: rgba(15, 118, 110, 0.46);
   box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
 }
-input:not([type="checkbox"]):not([type="radio"]):disabled,
+input:not([type="checkbox"]):not([type="radio"]):not(.seg):disabled,
 select:disabled {
   background: #eef3f8;
   color: #98a6b6;
