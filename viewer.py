@@ -1590,7 +1590,7 @@ header h1 {
   display: flex;
   align-items: center;
   border: 1px solid rgba(148, 163, 184, 0.4);
-  border-radius: var(--radius);
+  border-radius: 12px;
   background: #fff;
   padding: 0 2px;
   height: 34px;
@@ -1683,6 +1683,38 @@ header h1 {
   opacity: 0;
   pointer-events: none;
 }
+.seg-wrap .seg-spin {
+  display: flex;
+  flex-direction: column;
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 16px;
+  height: 28px;
+  justify-content: center;
+  gap: 0;
+}
+.seg-wrap .seg-spin button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 14px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: #94a3b8;
+  transition: color 0.12s ease;
+  line-height: 1;
+}
+.seg-wrap .seg-spin button:hover {
+  color: var(--accent-strong);
+}
+.seg-wrap .seg-spin button svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+}
 .flatpickr-calendar {
   font-family: var(--font-sans);
   color: var(--text);
@@ -1714,10 +1746,14 @@ header h1 {
 }
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
   width: 64px;
+  height: 24px;
+  line-height: 24px;
+  padding: 0;
 }
 .flatpickr-calendar .flatpickr-current-month .numInputWrapper {
   width: 64px;
   min-width: 64px;
+  height: 24px;
   overflow: visible;
 }
 .flatpickr-calendar .flatpickr-current-month {
@@ -3488,8 +3524,22 @@ function buildSegTime(hiddenId){
   wrap.appendChild(hInp);
   wrap.appendChild(sep);
   wrap.appendChild(miInp);
+  const spin = document.createElement('div');
+  spin.className = 'seg-spin';
+  const upBtn = document.createElement('button');
+  upBtn.type = 'button';
+  upBtn.tabIndex = -1;
+  upBtn.innerHTML = '<svg viewBox="0 0 10 10"><path d="M2 7L5 3l3 4z"/></svg>';
+  const downBtn = document.createElement('button');
+  downBtn.type = 'button';
+  downBtn.tabIndex = -1;
+  downBtn.innerHTML = '<svg viewBox="0 0 10 10"><path d="M2 3l3 4 3-4z"/></svg>';
+  spin.appendChild(upBtn);
+  spin.appendChild(downBtn);
+  wrap.appendChild(spin);
   hidden.parentNode.insertBefore(wrap, hidden);
   wrap.appendChild(hidden);
+  let lastFocusedSeg = hInp;
   function syncToHidden(){
     const h = hInp.value, mi = miInp.value;
     if(h && mi){
@@ -3510,6 +3560,25 @@ function buildSegTime(hiddenId){
     syncToHidden();
     return hidden.value;
   }
+  function stepFocused(delta){
+    const seg = lastFocusedSeg;
+    const idx = segs.indexOf(seg);
+    if(idx < 0) return;
+    let val = parseInt(seg.value, 10);
+    if(isNaN(val)) val = 0;
+    val += delta;
+    if(seg.classList.contains('seg-h')){
+      if(val < 0) val = 23;
+      if(val > 23) val = 0;
+    } else {
+      if(val < 0) val = 59;
+      if(val > 59) val = 0;
+    }
+    seg.value = pad2(val);
+    syncToHidden();
+  }
+  upBtn.addEventListener('click', () => { stepFocused(1); });
+  downBtn.addEventListener('click', () => { stepFocused(-1); });
   segs.forEach((seg, i) => {
     seg.addEventListener('input', () => {
       seg.value = seg.value.replace(/[^0-9]/g, '');
@@ -3517,7 +3586,7 @@ function buildSegTime(hiddenId){
       syncToHidden();
     });
     seg.addEventListener('keydown', (e) => segHandleKeydown(segs, i, e));
-    seg.addEventListener('focus', () => seg.select());
+    seg.addEventListener('focus', () => { seg.select(); lastFocusedSeg = seg; });
     seg.addEventListener('blur', () => {
       if(!seg.value) return;
       seg.value = pad2(parseInt(seg.value, 10) || 0);
@@ -3545,8 +3614,14 @@ function initFlatpickrDate(id, onChange){
   const hidden = document.getElementById(id);
   if(!hidden) return;
   const seg = segInstances[id];
-  const posEl = seg ? seg.wrap : hidden;
-  const fp = flatpickr(hidden, {
+  if(!seg) return;
+  const posEl = seg.wrap;
+  const dummy = document.createElement('input');
+  dummy.type = 'text';
+  dummy.className = 'seg flatpickr-dummy';
+  dummy.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;overflow:hidden;border:0;padding:0;margin:0;';
+  seg.wrap.appendChild(dummy);
+  const fp = flatpickr(dummy, {
     dateFormat: 'Y-m-d',
     allowInput: false,
     locale: getFpLocale(),
@@ -3556,16 +3631,14 @@ function initFlatpickrDate(id, onChange){
       const actions = buildFpExtraActions({
         onClear: function(){
           instance.clear();
-          if(seg) seg.setFromIso('');
+          seg.setFromIso('');
           instance.close();
           if(onChange) onChange();
         },
         onToday: function(){
           instance.setDate(new Date(), true);
-          if(seg){
-            const d = instance.selectedDates[0];
-            seg.setFromIso(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
-          }
+          const d = instance.selectedDates[0];
+          seg.setFromIso(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
           instance.close();
           if(onChange) onChange();
         },
@@ -3573,24 +3646,21 @@ function initFlatpickrDate(id, onChange){
       instance.calendarContainer.appendChild(actions);
     },
     onChange: function(selectedDates){
-      if(seg && selectedDates.length > 0){
+      if(selectedDates.length > 0){
         const d = selectedDates[0];
         seg.setFromIso(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
       }
       if(onChange) onChange();
     },
   });
-  if(seg){
-    seg.icon.addEventListener('click', () => fp.toggle());
-    seg.segs.forEach(s => {
-      s.addEventListener('change', () => { if(onChange) onChange(); });
-    });
-    seg.wrap.addEventListener('change', () => {
-      const val = seg.getValue();
-      if(val) fp.setDate(val, false);
-    });
+  seg.icon.addEventListener('click', () => fp.toggle());
+  seg.segs.forEach(s => {
+    s.addEventListener('change', () => { if(onChange) onChange(); });
+  });
+  if(prevValue){
+    fp.setDate(prevValue, false);
+    seg.setFromIso(prevValue);
   }
-  if(prevValue) fp.setDate(prevValue, false);
   fpInstances[id] = fp;
 }
 function initFlatpickrDateTime(dateId, timeId, onChange){
@@ -3603,8 +3673,14 @@ function initFlatpickrDateTime(dateId, timeId, onChange){
   if(!hidden) return;
   const dateSeg = segInstances[dateId];
   const timeSeg = segInstances[timeId];
-  const posEl = dateSeg ? dateSeg.wrap : hidden;
-  const fp = flatpickr(hidden, {
+  if(!dateSeg) return;
+  const posEl = dateSeg.wrap;
+  const dummy = document.createElement('input');
+  dummy.type = 'text';
+  dummy.className = 'seg flatpickr-dummy';
+  dummy.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;overflow:hidden;border:0;padding:0;margin:0;';
+  dateSeg.wrap.appendChild(dummy);
+  const fp = flatpickr(dummy, {
     dateFormat: 'Y-m-d',
     allowInput: false,
     locale: getFpLocale(),
@@ -3614,7 +3690,7 @@ function initFlatpickrDateTime(dateId, timeId, onChange){
       const actions = buildFpExtraActions({
         onClear: function(){
           instance.clear();
-          if(dateSeg) dateSeg.setFromIso('');
+          dateSeg.setFromIso('');
           if(timeSeg) timeSeg.setFromValue('');
           else if(timeEl) timeEl.value = '';
           instance.close();
@@ -3623,9 +3699,7 @@ function initFlatpickrDateTime(dateId, timeId, onChange){
         onToday: function(){
           const now = new Date();
           instance.setDate(now, true);
-          if(dateSeg){
-            dateSeg.setFromIso(now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()));
-          }
+          dateSeg.setFromIso(now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()));
           const timeStr = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
           if(timeSeg) timeSeg.setFromValue(timeStr);
           else if(timeEl) timeEl.value = timeStr;
@@ -3636,30 +3710,36 @@ function initFlatpickrDateTime(dateId, timeId, onChange){
       instance.calendarContainer.appendChild(actions);
     },
     onChange: function(selectedDates){
-      if(dateSeg && selectedDates.length > 0){
+      if(selectedDates.length > 0){
         const d = selectedDates[0];
         dateSeg.setFromIso(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
       }
       if(onChange) onChange();
     },
   });
-  if(dateSeg){
-    dateSeg.icon.addEventListener('click', () => fp.toggle());
-    dateSeg.segs.forEach(s => {
-      s.addEventListener('change', () => { if(onChange) onChange(); });
-    });
-  }
+  dateSeg.icon.addEventListener('click', () => fp.toggle());
+  dateSeg.segs.forEach(s => {
+    s.addEventListener('change', () => { if(onChange) onChange(); });
+  });
   if(timeSeg){
     timeSeg.segs.forEach(s => {
       s.addEventListener('change', () => { if(onChange) onChange(); });
     });
   }
-  if(prevDate) fp.setDate(prevDate, false);
+  if(prevDate){
+    fp.setDate(prevDate, false);
+    dateSeg.setFromIso(prevDate);
+  }
   fpInstances[dateId] = fp;
 }
 function destroyFpInstance(id){
   if(fpInstances[id]){
-    fpInstances[id].destroy();
+    const inst = fpInstances[id];
+    const dummy = inst.element;
+    inst.destroy();
+    if(dummy && dummy.classList.contains('flatpickr-dummy') && dummy.parentNode){
+      dummy.parentNode.removeChild(dummy);
+    }
     delete fpInstances[id];
   }
 }
@@ -5249,13 +5329,15 @@ function applyDatePasteValue(input, raw){
   if(!dateIso){
     return false;
   }
-  const fp = fpInstances[input.id];
-  if(fp){
-    fp.setDate(dateIso, true);
+  const seg = segInstances[input.id];
+  if(seg){
+    seg.setFromIso(dateIso);
   } else {
     input.value = dateIso;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
   }
+  const fp = fpInstances[input.id];
+  if(fp) fp.setDate(dateIso, false);
+  input.dispatchEvent(new Event('change', { bubbles: true }));
   return true;
 }
 
@@ -5267,14 +5349,14 @@ function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
   if(dateTimeIso){
     const dateVal = parseDateInputToIso(dateTimeIso);
     const timeVal = extractTimeInputFromIso(dateTimeIso);
+    const dateSeg = segInstances[dateInput.id];
+    const timeSeg = segInstances[timeInput.id];
+    if(dateSeg) dateSeg.setFromIso(dateVal);
+    else dateInput.value = dateVal;
+    if(timeSeg) timeSeg.setFromValue(timeVal);
+    else timeInput.value = timeVal;
     const fp = fpInstances[dateInput.id];
-    if(fp){
-      fp.setDate(combineDateTimeStr(dateVal, timeVal), true);
-      if(timeInput) timeInput.value = timeVal;
-    } else {
-      dateInput.value = dateVal;
-      timeInput.value = timeVal;
-    }
+    if(fp) fp.setDate(dateVal, false);
     syncDateTimeInputPairState(dateInput.id, timeInput.id);
     target.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
@@ -5284,12 +5366,11 @@ function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
     if(!dateIso){
       return false;
     }
+    const dateSeg = segInstances[dateInput.id];
+    if(dateSeg) dateSeg.setFromIso(dateIso);
+    else dateInput.value = dateIso;
     const fp = fpInstances[dateInput.id];
-    if(fp){
-      fp.setDate(dateIso, true);
-    } else {
-      dateInput.value = dateIso;
-    }
+    if(fp) fp.setDate(dateIso, false);
     syncDateTimeInputPairState(dateInput.id, timeInput.id);
     dateInput.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
@@ -5298,7 +5379,9 @@ function applyDateTimePairPasteValue(dateInput, timeInput, target, raw){
   if(!timeValue || !parseDateInputToIso(dateInput.value)){
     return false;
   }
-  timeInput.value = timeValue;
+  const timeSeg = segInstances[timeInput.id];
+  if(timeSeg) timeSeg.setFromValue(timeValue);
+  else timeInput.value = timeValue;
   syncDateTimeInputPairState(dateInput.id, timeInput.id);
   timeInput.dispatchEvent(new Event('change', { bubbles: true }));
   return true;
@@ -5342,6 +5425,8 @@ function syncDateTimeInputPairState(dateId, timeId){
     if(timeDisabled) timeSeg.wrap.classList.add('disabled');
     else timeSeg.wrap.classList.remove('disabled');
     timeSeg.segs.forEach(s => { s.disabled = timeDisabled; });
+    const spinBtns = timeSeg.wrap.querySelectorAll('.seg-spin button');
+    spinBtns.forEach(b => { b.disabled = timeDisabled; });
   } else {
     timeInput.disabled = !hasControlAccess || !hasDate;
   }
