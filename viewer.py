@@ -1574,16 +1574,98 @@ header h1 {
 }
 .datetime-split {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) 112px;
   gap: var(--space-3);
   align-items: center;
 }
-.datetime-split > input {
+.datetime-split > input,
+.datetime-split > .seg-wrap {
   min-width: 0;
 }
 .field-grid .datetime-split,
 .detail-event-date-row .datetime-split {
   width: 100%;
+}
+.seg-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 0 2px;
+  height: 34px;
+  box-sizing: border-box;
+  position: relative;
+  gap: 0;
+}
+.seg-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.12);
+}
+.seg-wrap.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  background: #f1f5f9;
+}
+.seg-wrap .seg {
+  border: 0;
+  outline: none;
+  background: transparent;
+  text-align: center;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--text);
+  padding: 0;
+  line-height: 32px;
+  height: 32px;
+  box-sizing: border-box;
+}
+.seg-wrap .seg::placeholder {
+  color: #94a3b8;
+  font-weight: 400;
+}
+.seg-wrap .seg:focus {
+  background: rgba(15, 118, 110, 0.08);
+  border-radius: 4px;
+}
+.seg-wrap .seg-y { width: 40px; }
+.seg-wrap .seg-m,
+.seg-wrap .seg-d,
+.seg-wrap .seg-h,
+.seg-wrap .seg-mi { width: 26px; }
+.seg-wrap .seg-sep {
+  color: #94a3b8;
+  font-size: var(--text-body);
+  user-select: none;
+  pointer-events: none;
+  flex-shrink: 0;
+  line-height: 32px;
+}
+.seg-wrap .seg-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  color: #64748b;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.seg-wrap .seg-icon:hover {
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--accent-strong);
+}
+.seg-wrap .seg-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 .flatpickr-calendar {
   font-family: var(--font-sans);
@@ -1613,6 +1695,13 @@ header h1 {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.01em;
+}
+.flatpickr-calendar .flatpickr-current-month input.cur-year {
+  width: 50px;
+}
+.flatpickr-calendar .flatpickr-current-month {
+  width: 75%;
+  left: 12.5%;
 }
 .flatpickr-calendar .flatpickr-prev-month,
 .flatpickr-calendar .flatpickr-next-month {
@@ -2882,23 +2971,23 @@ pre {
           <div class="field-grid">
             <label class="field">
               <span>開始日</span>
-              <input id="date_from" type="text" />
+              <input id="date_from" type="hidden" />
             </label>
             <label class="field">
               <span>終了日</span>
-              <input id="date_to" type="text" />
+              <input id="date_to" type="hidden" />
             </label>
             <div class="field">
               <span id="event_date_from_label">イベント開始日時</span>
               <div class="datetime-split">
-                <input id="event_date_from_date" type="text" aria-label="イベント開始日時 日付" />
+                <input id="event_date_from_date" type="hidden" />
                 <input id="event_date_from_time" type="hidden" />
               </div>
             </div>
             <div class="field">
               <span id="event_date_to_label">イベント終了日時</span>
               <div class="datetime-split">
-                <input id="event_date_to_date" type="text" aria-label="イベント終了日時 日付" />
+                <input id="event_date_to_date" type="hidden" />
                 <input id="event_date_to_time" type="hidden" />
               </div>
             </div>
@@ -2997,14 +3086,14 @@ pre {
             <div class="field">
               <span id="detail_event_date_from_label">イベント開始日時</span>
               <div class="datetime-split">
-                <input id="detail_event_date_from_date" type="text" aria-label="詳細イベント開始日時 日付" />
+                <input id="detail_event_date_from_date" type="hidden" />
                 <input id="detail_event_date_from_time" type="hidden" />
               </div>
             </div>
             <div class="field">
               <span id="detail_event_date_to_label">イベント終了日時</span>
               <div class="datetime-split">
-                <input id="detail_event_date_to_date" type="text" aria-label="詳細イベント終了日時 日付" />
+                <input id="detail_event_date_to_date" type="hidden" />
                 <input id="detail_event_date_to_time" type="hidden" />
               </div>
             </div>
@@ -3171,6 +3260,7 @@ const state = {
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
 const LANGUAGE_STORAGE_KEY = 'codex_sessions_viewer_language_v1';
 const fpInstances = {};
+const segInstances = {};
 const FP_LOCALE_MAP = {
   ja: typeof flatpickr !== 'undefined' && flatpickr.l10ns && flatpickr.l10ns.ja ? flatpickr.l10ns.ja : null,
   en: null,
@@ -3201,36 +3291,266 @@ function buildFpExtraActions(opts){
   wrap.appendChild(todayBtn);
   return wrap;
 }
+const CAL_SVG = '<svg viewBox="0 0 16 16"><path d="M4.5 1a.5.5 0 0 1 .5.5V3h6V1.5a.5.5 0 0 1 1 0V3h1.5A1.5 1.5 0 0 1 15 4.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 13.5v-9A1.5 1.5 0 0 1 2.5 3H4V1.5a.5.5 0 0 1 .5-.5zM14 7H2v6.5a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5V7zM2.5 4a.5.5 0 0 0-.5.5V6h12V4.5a.5.5 0 0 0-.5-.5h-11z"/></svg>';
+function createSegInput(cls, maxLen, ph){
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = 'seg ' + cls;
+  inp.maxLength = maxLen;
+  inp.placeholder = ph;
+  inp.setAttribute('inputmode', 'numeric');
+  inp.autocomplete = 'off';
+  return inp;
+}
+function createSegSep(ch){
+  const sp = document.createElement('span');
+  sp.className = 'seg-sep';
+  sp.textContent = ch;
+  return sp;
+}
+function createSegIcon(svgHtml){
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'seg-icon';
+  btn.tabIndex = -1;
+  btn.innerHTML = svgHtml;
+  return btn;
+}
+function segAutoAdvance(segments, idx){
+  const seg = segments[idx];
+  if(!seg) return;
+  const max = Number(seg.maxLength);
+  if(seg.value.length >= max && idx + 1 < segments.length){
+    segments[idx + 1].focus();
+    segments[idx + 1].select();
+  }
+}
+function segHandleKeydown(segments, idx, e){
+  const seg = segments[idx];
+  if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){
+    e.preventDefault();
+    segStepValue(segments, idx, e.key === 'ArrowUp' ? 1 : -1);
+    return;
+  }
+  if(e.key === 'Backspace' && seg.value === '' && idx > 0){
+    e.preventDefault();
+    segments[idx - 1].focus();
+    return;
+  }
+  if(e.key === 'ArrowLeft' && seg.selectionStart === 0 && idx > 0){
+    e.preventDefault();
+    segments[idx - 1].focus();
+    return;
+  }
+  if(e.key === 'ArrowRight' && seg.selectionStart >= seg.value.length && idx + 1 < segments.length){
+    e.preventDefault();
+    segments[idx + 1].focus();
+    segments[idx + 1].select();
+    return;
+  }
+}
+function segStepValue(segments, idx, delta){
+  const seg = segments[idx];
+  const max = Number(seg.maxLength);
+  let val = parseInt(seg.value, 10);
+  if(isNaN(val)) val = 0;
+  val += delta;
+  if(max === 4){
+    if(val < 1900) val = 1900;
+    if(val > 2999) val = 2999;
+    seg.value = String(val);
+  } else if(seg.className.indexOf('seg-m') >= 0 && seg.className.indexOf('seg-mi') < 0){
+    if(val < 1) val = 12;
+    if(val > 12) val = 1;
+    seg.value = pad2(val);
+  } else if(seg.className.indexOf('seg-d') >= 0){
+    if(val < 1) val = 31;
+    if(val > 31) val = 1;
+    seg.value = pad2(val);
+  } else if(seg.className.indexOf('seg-h') >= 0){
+    if(val < 0) val = 23;
+    if(val > 23) val = 0;
+    seg.value = pad2(val);
+  } else if(seg.className.indexOf('seg-mi') >= 0){
+    if(val < 0) val = 59;
+    if(val > 59) val = 0;
+    seg.value = pad2(val);
+  }
+  seg.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function buildSegDate(hiddenId){
+  const hidden = document.getElementById(hiddenId);
+  if(!hidden) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'seg-wrap seg-date-wrap';
+  const yInp = createSegInput('seg-y', 4, 'yyyy');
+  const sep1 = createSegSep('/');
+  const mInp = createSegInput('seg-m', 2, 'mm');
+  const sep2 = createSegSep('/');
+  const dInp = createSegInput('seg-d', 2, 'dd');
+  const icon = createSegIcon(CAL_SVG);
+  const segs = [yInp, mInp, dInp];
+  wrap.appendChild(yInp);
+  wrap.appendChild(sep1);
+  wrap.appendChild(mInp);
+  wrap.appendChild(sep2);
+  wrap.appendChild(dInp);
+  wrap.appendChild(icon);
+  hidden.parentNode.insertBefore(wrap, hidden);
+  wrap.appendChild(hidden);
+  function syncToHidden(){
+    const y = yInp.value, m = mInp.value, d = dInp.value;
+    if(y && m && d){
+      const iso = parseDateInputToIso(y + '-' + m + '-' + d);
+      hidden.value = iso;
+    } else if(!y && !m && !d){
+      hidden.value = '';
+    }
+  }
+  function setFromIso(iso){
+    if(!iso){ yInp.value = ''; mInp.value = ''; dInp.value = ''; hidden.value = ''; return; }
+    const parsed = parseDateInputToIso(iso);
+    if(!parsed){ yInp.value = ''; mInp.value = ''; dInp.value = ''; hidden.value = ''; return; }
+    const parts = parsed.split('-');
+    yInp.value = parts[0]; mInp.value = parts[1]; dInp.value = parts[2];
+    hidden.value = parsed;
+  }
+  function getValue(){
+    syncToHidden();
+    return hidden.value;
+  }
+  segs.forEach((seg, i) => {
+    seg.addEventListener('input', () => {
+      seg.value = seg.value.replace(/[^0-9]/g, '');
+      segAutoAdvance(segs, i);
+      syncToHidden();
+    });
+    seg.addEventListener('keydown', (e) => segHandleKeydown(segs, i, e));
+    seg.addEventListener('focus', () => seg.select());
+  });
+  wrap.addEventListener('paste', (e) => {
+    const text = e.clipboardData ? e.clipboardData.getData('text') : '';
+    const iso = parseDateInputToIso(text);
+    if(iso){
+      e.preventDefault();
+      e.stopPropagation();
+      setFromIso(iso);
+      hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  const inst = { wrap, segs, hidden, icon, setFromIso, getValue, syncToHidden };
+  segInstances[hiddenId] = inst;
+  return inst;
+}
+function buildSegTime(hiddenId){
+  const hidden = document.getElementById(hiddenId);
+  if(!hidden) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'seg-wrap seg-time-wrap';
+  const hInp = createSegInput('seg-h', 2, 'hh');
+  const sep = createSegSep(':');
+  const miInp = createSegInput('seg-mi', 2, 'mm');
+  const segs = [hInp, miInp];
+  wrap.appendChild(hInp);
+  wrap.appendChild(sep);
+  wrap.appendChild(miInp);
+  hidden.parentNode.insertBefore(wrap, hidden);
+  wrap.appendChild(hidden);
+  function syncToHidden(){
+    const h = hInp.value, mi = miInp.value;
+    if(h && mi){
+      hidden.value = parseTimeInputToValue(h + ':' + mi);
+    } else if(!h && !mi){
+      hidden.value = '';
+    }
+  }
+  function setFromValue(val){
+    if(!val){ hInp.value = ''; miInp.value = ''; hidden.value = ''; return; }
+    const parsed = parseTimeInputToValue(val);
+    if(!parsed){ hInp.value = ''; miInp.value = ''; hidden.value = ''; return; }
+    const parts = parsed.split(':');
+    hInp.value = parts[0]; miInp.value = parts[1];
+    hidden.value = parsed;
+  }
+  function getValue(){
+    syncToHidden();
+    return hidden.value;
+  }
+  segs.forEach((seg, i) => {
+    seg.addEventListener('input', () => {
+      seg.value = seg.value.replace(/[^0-9]/g, '');
+      segAutoAdvance(segs, i);
+      syncToHidden();
+    });
+    seg.addEventListener('keydown', (e) => segHandleKeydown(segs, i, e));
+    seg.addEventListener('focus', () => seg.select());
+  });
+  wrap.addEventListener('paste', (e) => {
+    const text = e.clipboardData ? e.clipboardData.getData('text') : '';
+    const tv = parseTimeInputToValue(text);
+    if(tv){
+      e.preventDefault();
+      e.stopPropagation();
+      setFromValue(tv);
+      hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  const inst = { wrap, segs, hidden, setFromValue, getValue, syncToHidden };
+  segInstances[hiddenId] = inst;
+  return inst;
+}
 function initFlatpickrDate(id, onChange){
   const prevValue = parseDateInputToIso(getFpDateValue(id));
   destroyFpInstance(id);
   if(typeof flatpickr === 'undefined') return;
-  const el = document.getElementById(id);
-  if(!el) return;
-  const fp = flatpickr(el, {
+  const hidden = document.getElementById(id);
+  if(!hidden) return;
+  const seg = segInstances[id];
+  const posEl = seg ? seg.wrap : hidden;
+  const fp = flatpickr(hidden, {
     dateFormat: 'Y-m-d',
-    allowInput: true,
+    allowInput: false,
     locale: getFpLocale(),
-    clickOpens: true,
+    clickOpens: false,
+    positionElement: posEl,
     onReady: function(selectedDates, dateStr, instance){
       const actions = buildFpExtraActions({
         onClear: function(){
           instance.clear();
+          if(seg) seg.setFromIso('');
           instance.close();
           if(onChange) onChange();
         },
         onToday: function(){
           instance.setDate(new Date(), true);
+          if(seg){
+            const d = instance.selectedDates[0];
+            seg.setFromIso(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
+          }
           instance.close();
           if(onChange) onChange();
         },
       });
       instance.calendarContainer.appendChild(actions);
     },
-    onChange: function(){
+    onChange: function(selectedDates){
+      if(seg && selectedDates.length > 0){
+        const d = selectedDates[0];
+        seg.setFromIso(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
+      }
       if(onChange) onChange();
     },
   });
+  if(seg){
+    seg.icon.addEventListener('click', () => fp.toggle());
+    seg.segs.forEach(s => {
+      s.addEventListener('change', () => { if(onChange) onChange(); });
+    });
+    seg.wrap.addEventListener('change', () => {
+      const val = seg.getValue();
+      if(val) fp.setDate(val, false);
+    });
+  }
   if(prevValue) fp.setDate(prevValue, false);
   fpInstances[id] = fp;
 }
@@ -3240,50 +3560,63 @@ function initFlatpickrDateTime(dateId, timeId, onChange){
   const prevTime = timeEl ? parseTimeInputToValue(timeEl.value) : '';
   destroyFpInstance(dateId);
   if(typeof flatpickr === 'undefined') return;
-  const el = document.getElementById(dateId);
-  if(!el) return;
-  const initial = combineDateTimeStr(prevDate, prevTime);
-  const fp = flatpickr(el, {
-    enableTime: true,
-    dateFormat: 'Y-m-d H:i',
-    time_24hr: true,
-    allowInput: true,
+  const hidden = document.getElementById(dateId);
+  if(!hidden) return;
+  const dateSeg = segInstances[dateId];
+  const timeSeg = segInstances[timeId];
+  const posEl = dateSeg ? dateSeg.wrap : hidden;
+  const fp = flatpickr(hidden, {
+    dateFormat: 'Y-m-d',
+    allowInput: false,
     locale: getFpLocale(),
-    clickOpens: true,
+    clickOpens: false,
+    positionElement: posEl,
     onReady: function(selectedDates, dateStr, instance){
       const actions = buildFpExtraActions({
         onClear: function(){
           instance.clear();
-          if(timeEl) timeEl.value = '';
+          if(dateSeg) dateSeg.setFromIso('');
+          if(timeSeg) timeSeg.setFromValue('');
+          else if(timeEl) timeEl.value = '';
           instance.close();
           if(onChange) onChange();
         },
         onToday: function(){
-          instance.setDate(new Date(), true);
-          syncFpDateTimeToHidden(instance, timeEl);
+          const now = new Date();
+          instance.setDate(now, true);
+          if(dateSeg){
+            dateSeg.setFromIso(now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()));
+          }
+          const timeStr = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+          if(timeSeg) timeSeg.setFromValue(timeStr);
+          else if(timeEl) timeEl.value = timeStr;
           instance.close();
           if(onChange) onChange();
         },
       });
       instance.calendarContainer.appendChild(actions);
     },
-    onChange: function(selectedDates, dateStr, instance){
-      syncFpDateTimeToHidden(instance, timeEl);
+    onChange: function(selectedDates){
+      if(dateSeg && selectedDates.length > 0){
+        const d = selectedDates[0];
+        dateSeg.setFromIso(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
+      }
       if(onChange) onChange();
     },
   });
-  if(initial) fp.setDate(initial, false);
-  fpInstances[dateId] = fp;
-}
-function syncFpDateTimeToHidden(instance, timeEl){
-  if(!timeEl) return;
-  const sel = instance.selectedDates;
-  if(sel.length > 0){
-    const d = sel[0];
-    timeEl.value = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-  } else {
-    timeEl.value = '';
+  if(dateSeg){
+    dateSeg.icon.addEventListener('click', () => fp.toggle());
+    dateSeg.segs.forEach(s => {
+      s.addEventListener('change', () => { if(onChange) onChange(); });
+    });
   }
+  if(timeSeg){
+    timeSeg.segs.forEach(s => {
+      s.addEventListener('change', () => { if(onChange) onChange(); });
+    });
+  }
+  if(prevDate) fp.setDate(prevDate, false);
+  fpInstances[dateId] = fp;
 }
 function destroyFpInstance(id){
   if(fpInstances[id]){
@@ -3295,10 +3628,14 @@ function destroyAllFpInstances(){
   Object.keys(fpInstances).forEach(destroyFpInstance);
 }
 function setFpDateValue(id, value){
+  const seg = segInstances[id];
+  if(seg){
+    seg.setFromIso(value || '');
+  }
   const fp = fpInstances[id];
   if(fp){
     fp.setDate(value || null, false);
-  } else {
+  } else if(!seg){
     const el = document.getElementById(id);
     if(el) el.value = value || '';
   }
@@ -3308,26 +3645,41 @@ function combineDateTimeStr(dateStr, timeStr){
   return timeStr ? dateStr + ' ' + timeStr : dateStr;
 }
 function setFpDateTimeValue(dateId, timeId, dateVal, timeVal){
+  const dateSeg = segInstances[dateId];
+  const timeSeg = segInstances[timeId];
+  if(dateSeg) dateSeg.setFromIso(dateVal || '');
+  if(timeSeg) timeSeg.setFromValue(timeVal || '');
   const fp = fpInstances[dateId];
-  const timeEl = document.getElementById(timeId);
   if(fp){
-    fp.setDate(combineDateTimeStr(dateVal, timeVal) || null, false);
-  } else {
+    fp.setDate(dateVal || null, false);
+  } else if(!dateSeg){
     const el = document.getElementById(dateId);
     if(el) el.value = dateVal || '';
   }
-  if(timeEl) timeEl.value = timeVal || '';
+  if(!timeSeg){
+    const timeEl = document.getElementById(timeId);
+    if(timeEl) timeEl.value = timeVal || '';
+  }
 }
 function clearFpInstance(id){
+  const seg = segInstances[id];
+  if(seg){
+    if(seg.setFromIso) seg.setFromIso('');
+    else if(seg.setFromValue) seg.setFromValue('');
+  }
   const fp = fpInstances[id];
   if(fp){
     fp.clear();
-  } else {
+  } else if(!seg){
     const el = document.getElementById(id);
     if(el) el.value = '';
   }
 }
 function getFpDateValue(id){
+  const seg = segInstances[id];
+  if(seg && seg.getValue){
+    return seg.getValue();
+  }
   const fp = fpInstances[id];
   if(fp && fp.selectedDates.length > 0){
     const d = fp.selectedDates[0];
@@ -3335,6 +3687,18 @@ function getFpDateValue(id){
   }
   const el = document.getElementById(id);
   return el ? el.value : '';
+}
+function initSegmentedInputs(){
+  buildSegDate('date_from');
+  buildSegDate('date_to');
+  buildSegDate('event_date_from_date');
+  buildSegTime('event_date_from_time');
+  buildSegDate('event_date_to_date');
+  buildSegTime('event_date_to_time');
+  buildSegDate('detail_event_date_from_date');
+  buildSegTime('detail_event_date_from_time');
+  buildSegDate('detail_event_date_to_date');
+  buildSegTime('detail_event_date_to_time');
 }
 function initAllFlatpickr(){
   initFlatpickrDate('date_from', applyFilter);
@@ -4021,6 +4385,10 @@ function setInputAriaLabel(id, value){
   const input = document.getElementById(id);
   if(input){
     input.setAttribute('aria-label', value);
+  }
+  const seg = segInstances[id];
+  if(seg && seg.wrap){
+    seg.wrap.setAttribute('aria-label', value);
   }
 }
 
@@ -4914,12 +5282,30 @@ function syncDateTimeInputPairState(dateId, timeId){
   const hasControlAccess = !requiresActiveSession || !!state.activeSession;
   const hasDate = Boolean(parseDateInputToIso(dateInput.value));
   if(!hasDate){
-    timeInput.value = '';
+    const timeSeg = segInstances[timeId];
+    if(timeSeg) timeSeg.setFromValue('');
+    else timeInput.value = '';
   } else if(timeInput.value){
     timeInput.value = parseTimeInputToValue(timeInput.value);
   }
-  dateInput.disabled = !hasControlAccess;
-  timeInput.disabled = !hasControlAccess || !hasDate;
+  const dateSeg = segInstances[dateId];
+  const timeSeg = segInstances[timeId];
+  if(dateSeg){
+    if(!hasControlAccess) dateSeg.wrap.classList.add('disabled');
+    else dateSeg.wrap.classList.remove('disabled');
+    dateSeg.segs.forEach(s => { s.disabled = !hasControlAccess; });
+    if(dateSeg.icon) dateSeg.icon.disabled = !hasControlAccess;
+  } else {
+    dateInput.disabled = !hasControlAccess;
+  }
+  if(timeSeg){
+    const timeDisabled = !hasControlAccess || !hasDate;
+    if(timeDisabled) timeSeg.wrap.classList.add('disabled');
+    else timeSeg.wrap.classList.remove('disabled');
+    timeSeg.segs.forEach(s => { s.disabled = timeDisabled; });
+  } else {
+    timeInput.disabled = !hasControlAccess || !hasDate;
+  }
 }
 
 function refreshDateTimeInputPairStates(){
@@ -6010,9 +6396,9 @@ function clearFilters(){
   clearFpInstance('date_from');
   clearFpInstance('date_to');
   clearFpInstance('event_date_from_date');
-  document.getElementById('event_date_from_time').value = '';
+  clearFpInstance('event_date_from_time');
   clearFpInstance('event_date_to_date');
-  document.getElementById('event_date_to_time').value = '';
+  clearFpInstance('event_date_to_time');
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
@@ -6944,9 +7330,9 @@ bindDateTimePairPaste('detail_event_date_from_date', 'detail_event_date_from_tim
 bindDateTimePairPaste('detail_event_date_to_date', 'detail_event_date_to_time');
 safeBindById('clear_detail_event_date', 'click', () => {
   clearFpInstance('detail_event_date_from_date');
-  document.getElementById('detail_event_date_from_time').value = '';
+  clearFpInstance('detail_event_date_from_time');
   clearFpInstance('detail_event_date_to_date');
-  document.getElementById('detail_event_date_to_time').value = '';
+  clearFpInstance('detail_event_date_to_time');
   refreshDateTimeInputPairStates();
   saveFilters();
   renderActiveSession();
@@ -7246,6 +7632,7 @@ updateDetailKeywordControls({ total: 0 });
 updateRefreshDetailButtonState();
 updateFilterVisibility();
 restoreFilters();
+initSegmentedInputs();
 initAllFlatpickr();
 setUiLanguage(getRequestedLanguage(), false);
 updateFilterVisibility();
