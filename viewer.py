@@ -1672,6 +1672,17 @@ header h1 {
   height: 16px;
   fill: currentColor;
 }
+.seg-wrap input.flatpickr-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
 .flatpickr-calendar {
   font-family: var(--font-sans);
   color: var(--text);
@@ -1702,11 +1713,16 @@ header h1 {
   letter-spacing: 0.01em;
 }
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
-  width: 56px;
+  width: 64px;
+}
+.flatpickr-calendar .flatpickr-current-month .numInputWrapper {
+  width: 64px;
+  min-width: 64px;
+  overflow: visible;
 }
 .flatpickr-calendar .flatpickr-current-month {
-  width: 80%;
-  left: 10%;
+  width: 85%;
+  left: 7.5%;
 }
 .flatpickr-calendar .flatpickr-current-month .numInputWrapper span {
   display: none;
@@ -3435,6 +3451,16 @@ function buildSegDate(hiddenId){
     });
     seg.addEventListener('keydown', (e) => segHandleKeydown(segs, i, e));
     seg.addEventListener('focus', () => seg.select());
+    seg.addEventListener('blur', () => {
+      if(!seg.value) return;
+      const max = Number(seg.maxLength);
+      if(max === 4){
+        seg.value = seg.value.padStart(4, '0');
+      } else {
+        seg.value = pad2(parseInt(seg.value, 10) || 0);
+      }
+      syncToHidden();
+    });
   });
   wrap.addEventListener('paste', (e) => {
     e.preventDefault();
@@ -3492,6 +3518,11 @@ function buildSegTime(hiddenId){
     });
     seg.addEventListener('keydown', (e) => segHandleKeydown(segs, i, e));
     seg.addEventListener('focus', () => seg.select());
+    seg.addEventListener('blur', () => {
+      if(!seg.value) return;
+      seg.value = pad2(parseInt(seg.value, 10) || 0);
+      syncToHidden();
+    });
   });
   wrap.addEventListener('paste', (e) => {
     e.preventDefault();
