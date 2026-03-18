@@ -1616,7 +1616,7 @@ header h1 {
   background: transparent;
   box-shadow: none;
   text-align: center;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-sans);
   font-size: var(--text-body);
   font-weight: 600;
   color: var(--text);
@@ -1746,14 +1746,14 @@ header h1 {
 }
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
   width: 64px;
-  height: 24px;
-  line-height: 24px;
+  height: 20px;
+  line-height: 20px;
   padding: 0;
 }
 .flatpickr-calendar .flatpickr-current-month .numInputWrapper {
   width: 64px;
   min-width: 64px;
-  height: 24px;
+  height: 20px;
   overflow: visible;
 }
 .flatpickr-calendar .flatpickr-current-month {
@@ -6441,12 +6441,6 @@ function saveFilters(){
   const eventDateToIso = buildDateTimeIsoFromParts(eventDateToDate, eventDateToTime, 'end');
   const detailEventDateFromIso = buildDateTimeIsoFromParts(detailEventDateFromDate, detailEventDateFromTime, 'start');
   const detailEventDateToIso = buildDateTimeIsoFromParts(detailEventDateToDate, detailEventDateToTime, 'end');
-  setFpDateValue('date_from', dateFromIso);
-  setFpDateValue('date_to', dateToIso);
-  setFpDateTimeValue('event_date_from_date', 'event_date_from_time', eventDateFromDate, eventDateFromTime);
-  setFpDateTimeValue('event_date_to_date', 'event_date_to_time', eventDateToDate, eventDateToTime);
-  setFpDateTimeValue('detail_event_date_from_date', 'detail_event_date_from_time', detailEventDateFromDate, detailEventDateFromTime);
-  setFpDateTimeValue('detail_event_date_to_date', 'detail_event_date_to_time', detailEventDateToDate, detailEventDateToTime);
   refreshDateTimeInputPairStates();
   const payload = {
     cwd_q: document.getElementById('cwd_q').value,
