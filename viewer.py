@@ -1599,7 +1599,8 @@ header h1 {
   box-sizing: border-box;
   position: relative;
   gap: 0;
-  overflow: hidden;
+  overflow: visible;
+  font-family: var(--font-sans);
 }
 .seg-wrap:focus-within {
   border-color: var(--accent);
@@ -1705,7 +1706,9 @@ header h1 {
   padding: 0;
   color: #94a3b8;
   transition: color 0.12s ease;
-  line-height: 1;
+  line-height: 14px;
+  overflow: visible;
+  position: relative;
 }
 .seg-wrap .seg-spin button:hover {
   color: var(--accent-strong);
@@ -1714,6 +1717,11 @@ header h1 {
   width: 10px;
   height: 10px;
   fill: currentColor;
+  display: block;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 .flatpickr-calendar {
   font-family: var(--font-sans);
@@ -1746,15 +1754,19 @@ header h1 {
 }
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
   width: 64px;
-  height: 20px;
-  line-height: 20px;
+  min-height: 25px;
+  height: auto;
+  line-height: 25px;
   padding: 0;
+  border-radius: 10px;
 }
 .flatpickr-calendar .flatpickr-current-month .numInputWrapper {
   width: 64px;
   min-width: 64px;
-  height: 20px;
+  min-height: 25px;
+  height: auto;
   overflow: visible;
+  border-radius: 10px;
 }
 .flatpickr-calendar .flatpickr-current-month {
   width: 85%;
@@ -3476,7 +3488,8 @@ function buildSegDate(hiddenId){
     hidden.value = parsed;
   }
   function getValue(){
-    syncToHidden();
+    const y = yInp.value, m = mInp.value, d = dInp.value;
+    if(y && m && d) syncToHidden();
     return hidden.value;
   }
   segs.forEach((seg, i) => {
@@ -3508,6 +3521,7 @@ function buildSegDate(hiddenId){
       hidden.dispatchEvent(new Event('change', { bubbles: true }));
     }
   });
+  if(hidden.value) setFromIso(hidden.value);
   const inst = { wrap, segs, hidden, icon, setFromIso, getValue, syncToHidden };
   segInstances[hiddenId] = inst;
   return inst;
@@ -3557,7 +3571,8 @@ function buildSegTime(hiddenId){
     hidden.value = parsed;
   }
   function getValue(){
-    syncToHidden();
+    const h = hInp.value, mi = miInp.value;
+    if(h && mi) syncToHidden();
     return hidden.value;
   }
   function stepFocused(delta){
@@ -3603,6 +3618,7 @@ function buildSegTime(hiddenId){
       hidden.dispatchEvent(new Event('change', { bubbles: true }));
     }
   });
+  if(hidden.value) setFromValue(hidden.value);
   const inst = { wrap, segs, hidden, setFromValue, getValue, syncToHidden };
   segInstances[hiddenId] = inst;
   return inst;
