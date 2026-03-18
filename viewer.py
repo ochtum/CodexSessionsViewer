@@ -1588,29 +1588,29 @@ header h1 {
 .flatpickr-calendar {
   font-family: var(--font-sans);
   color: var(--text);
-  font-size: 12.5px;
-  width: 316px;
-  min-width: 316px;
+  font-size: 11.5px;
+  width: 230px;
+  min-width: 230px;
   border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 18px;
+  border-radius: 12px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 252, 0.98));
-  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.16), 0 8px 20px rgba(15, 118, 110, 0.08);
-  padding: 10px 10px 8px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 118, 110, 0.06);
+  padding: 6px 6px 4px;
 }
 .flatpickr-calendar .flatpickr-months {
-  padding: 4px 6px 10px;
+  padding: 2px 4px 6px;
 }
 .flatpickr-calendar .flatpickr-month {
-  height: 40px;
+  height: 30px;
 }
 .flatpickr-calendar .flatpickr-current-month {
-  padding-top: 6px;
+  padding-top: 4px;
 }
 .flatpickr-calendar .flatpickr-current-month .flatpickr-monthDropdown-months,
 .flatpickr-calendar .flatpickr-current-month .cur-month,
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
   color: var(--text);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.01em;
 }
@@ -1618,8 +1618,8 @@ header h1 {
 .flatpickr-calendar .flatpickr-next-month {
   color: #5d728d;
   fill: #5d728d;
-  padding: 8px;
-  border-radius: 10px;
+  padding: 6px;
+  border-radius: 6px;
   transition: background-color 0.18s ease, color 0.18s ease, fill 0.18s ease;
 }
 .flatpickr-calendar .flatpickr-prev-month:hover,
@@ -1630,28 +1630,28 @@ header h1 {
 }
 .flatpickr-calendar .flatpickr-time input,
 .flatpickr-calendar .numInputWrapper span {
-  font-size: 12.5px;
+  font-size: 11.5px;
 }
 .flatpickr-calendar .flatpickr-innerContainer,
 .flatpickr-calendar .flatpickr-rContainer,
 .flatpickr-calendar .flatpickr-days,
 .flatpickr-calendar .flatpickr-weekdays {
-  width: 294px;
-  min-width: 294px;
-  max-width: 294px;
+  width: 216px;
+  min-width: 216px;
+  max-width: 216px;
   margin: 0 auto;
 }
 .flatpickr-calendar .flatpickr-day {
-  width: 38px;
-  flex: 0 0 38px;
-  max-width: 38px;
-  height: 38px;
-  line-height: 38px;
+  width: 28px;
+  flex: 0 0 28px;
+  max-width: 28px;
+  height: 28px;
+  line-height: 28px;
   color: var(--text);
   border: 1px solid transparent;
-  border-radius: 12px;
-  margin: 2px;
-  font-size: 13px;
+  border-radius: 8px;
+  margin: 1px;
+  font-size: 11.5px;
   font-weight: 600;
   transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
@@ -1669,7 +1669,7 @@ header h1 {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.22);
+  box-shadow: 0 4px 10px rgba(15, 118, 110, 0.22);
 }
 .flatpickr-calendar .flatpickr-day.selected:hover,
 .flatpickr-calendar .flatpickr-day.startRange:hover,
@@ -1683,24 +1683,24 @@ header h1 {
   color: #9aa7b7;
 }
 .flatpickr-calendar .flatpickr-weekday {
-  width: 38px;
-  flex: 0 0 38px;
-  max-width: 38px;
-  margin: 0 2px;
+  width: 28px;
+  flex: 0 0 28px;
+  max-width: 28px;
+  margin: 0 1px;
   color: #738295;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .flatpickr-calendar .flatpickr-weekdaycontainer,
 .flatpickr-calendar .dayContainer {
-  width: 294px;
-  min-width: 294px;
-  max-width: 294px;
+  width: 216px;
+  min-width: 216px;
+  max-width: 216px;
 }
 .flatpickr-calendar .flatpickr-weekdays {
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 .flatpickr-calendar .flatpickr-weekdays .flatpickr-weekday:first-child {
   color: #c35656;
@@ -1715,29 +1715,29 @@ header h1 {
   color: #4d79cc;
 }
 .flatpickr-calendar .flatpickr-rContainer {
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 .flatpickr-calendar .flatpickr-time {
-  height: 56px;
-  max-height: 56px;
-  margin-top: 8px;
-  padding: 8px 12px 10px;
+  height: 44px;
+  max-height: 44px;
+  margin-top: 4px;
+  padding: 6px 8px 6px;
   border-top: 1px solid rgba(148, 163, 184, 0.24);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(246, 250, 255, 0.92));
   overflow: visible;
 }
 .flatpickr-calendar .flatpickr-time .numInputWrapper {
-  margin: 0 4px;
-  min-height: 34px;
+  margin: 0 3px;
+  min-height: 28px;
   border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 10px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
   overflow: visible;
 }
 .flatpickr-calendar .flatpickr-time input {
-  height: 34px;
-  line-height: 34px;
+  height: 28px;
+  line-height: 28px;
   color: var(--text);
   font-weight: 700;
   background: transparent;
@@ -1759,40 +1759,40 @@ header h1 {
   border-top-color: #64748b;
 }
 .flatpickr-calendar .flatpickr-confirm {
-  padding: 0 12px 12px;
+  padding: 0 8px 8px;
   border-top: 0;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 250, 255, 0.96));
 }
 .flatpickr-calendar .flatpickr-confirm .flatpickr-confirm-button {
   width: 100%;
-  min-height: 40px;
+  min-height: 32px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   color: #fff;
   font-family: var(--font-sans);
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 800;
-  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.22);
+  box-shadow: 0 6px 14px rgba(15, 118, 110, 0.22);
 }
 .flatpickr-calendar .flatpickr-confirm .flatpickr-confirm-button:hover {
   background: linear-gradient(135deg, #11847b 0%, #0c6760 100%);
-  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.24);
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.24);
 }
 .flatpickr-extra-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 12px 8px;
+  gap: 8px;
+  padding: 8px 8px 6px;
   border-top: 1px solid rgba(148, 163, 184, 0.24);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 250, 255, 0.96));
 }
 .flatpickr-extra-actions button.flatpickr-action {
-  min-height: 34px;
-  padding: 0 14px;
-  border-radius: 10px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 .flatpickr-extra-actions button.flatpickr-action-secondary {
