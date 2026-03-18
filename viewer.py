@@ -1043,6 +1043,14 @@ def classify_user_message(text: str) -> str:
     return 'user'
 
 
+def detect_user_message_system_labels(text: str):
+    lower = text.lower()
+    labels = []
+    if '<turn_aborted>' in lower and '</turn_aborted>' in lower:
+        labels.append('TURN_ABORTED')
+    return labels
+
+
 def build_session_events(path: Path):
     events = []
     raw_count = 0
@@ -1060,15 +1068,20 @@ def build_session_events(path: Path):
                     role = payload.get('role', 'unknown')
                     text = extract_text_from_content(payload.get('content', []))
                     if text:
+                        system_labels = []
                         if role == 'user':
                             role = classify_user_message(text)
-                        events.append({
+                            system_labels = detect_user_message_system_labels(text)
+                        event = {
                             'event_id': f'line-{raw_count}',
                             'timestamp': ts,
                             'kind': 'message',
                             'role': role,
                             'text': text,
-                        })
+                        }
+                        if system_labels:
+                            event['system_labels'] = system_labels
+                        events.append(event)
                 elif p_type == 'function_call':
                     events.append({
                         'event_id': f'line-{raw_count}',
@@ -2482,6 +2495,11 @@ button:disabled {
   background: #f7f9fc;
   border-color: #dde6ef;
   font-variant-numeric: tabular-nums;
+}
+.badge-system-label {
+  color: #7f1d1d;
+  background: #fee2e2;
+  border-color: #fecaca;
 }
 .badge-role.user {
   color: #0f4fbe;
@@ -4209,6 +4227,14 @@ function isTurnBoundaryFilterEnabled(){
   return !!(checkbox && checkbox.checked);
 }
 
+function isSystemLabeledUserEvent(ev){
+  if(!ev || ev.kind !== 'message' || ev.role !== 'user'){
+    return false;
+  }
+  const labels = ev.system_labels || [];
+  return Array.isArray(labels) && labels.includes('TURN_ABORTED');
+}
+
 function filterEventsToTurnBoundaries(events){
   if(!Array.isArray(events) || events.length === 0){
     return Array.isArray(events) ? events : [];
@@ -4234,6 +4260,9 @@ function filterEventsToTurnBoundaries(events){
       return;
     }
     if(ev.role === 'user'){
+      if(isSystemLabeledUserEvent(ev)){
+        return;
+      }
       flushTurn();
       pendingUser = ev;
       return;
@@ -4335,6 +4364,7 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
   const role = ev.role || 'system';
   const roleLabel = role.replace('_', ' ');
   const labels = ev.labels || [];
+  const systemLabels = ev.system_labels || [];
   const matchesSelectedLabel = selectedEventLabelId && labels.some(label => String(label.id) === selectedEventLabelId);
   const eventKey = getDetailEventKey(ev, fallbackIndex);
   const bodyText = getEventBodyText(ev);
@@ -4355,7 +4385,8 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
   const copyButtonHtml = ev.kind === 'message'
     ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">${esc(t('copy.single'))}</button>`
     : '';
-  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span><span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
+  const systemLabelsHtml = systemLabels.map(label => `<span class="badge-kind badge-system-label">${esc(label)}</span>`).join('');
+  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
 }
 
 function attachVisibleEventCardHandlers(eventsBox){
@@ -5981,7 +6012,16 @@ function getDisplayEvents(){
   if(showOnlyUser || showOnlyAssistant){
     events = events.filter(ev => {
       if(ev.kind !== 'message') return false;
-      return (showOnlyUser && ev.role === 'user') || (showOnlyAssistant && ev.role === 'assistant');
+      if(showOnlyUser && ev.role === 'user'){
+        if(isSystemLabeledUserEvent(ev)){
+          return false;
+        }
+        return true;
+      }
+      if(showOnlyAssistant && ev.role === 'assistant'){
+        return true;
+      }
+      return false;
     });
   }
   if(state.detailMessageRangeMode){
