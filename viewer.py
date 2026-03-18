@@ -1594,9 +1594,12 @@ header h1 {
   background: #fff;
   padding: 0 2px;
   height: 34px;
+  min-height: 34px;
+  max-height: 34px;
   box-sizing: border-box;
   position: relative;
   gap: 0;
+  overflow: hidden;
 }
 .seg-wrap:focus-within {
   border-color: var(--accent);
@@ -1607,33 +1610,35 @@ header h1 {
   pointer-events: none;
   background: #f1f5f9;
 }
-.seg-wrap .seg {
-  border: 0;
-  outline: none;
-  background: transparent;
+.seg-wrap input.seg {
+  border: 0 !important;
+  outline: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
   text-align: center;
   font-family: var(--font-mono, monospace);
   font-size: var(--text-body);
   font-weight: 600;
   color: var(--text);
-  padding: 0;
+  padding: 0 !important;
   line-height: 32px;
-  height: 32px;
+  height: 32px !important;
+  min-height: 32px !important;
   box-sizing: border-box;
+  border-radius: 0 !important;
 }
-.seg-wrap .seg::placeholder {
+.seg-wrap input.seg::placeholder {
   color: #94a3b8;
   font-weight: 400;
 }
-.seg-wrap .seg:focus {
-  background: rgba(15, 118, 110, 0.08);
-  border-radius: 4px;
+.seg-wrap input.seg:focus {
+  background: transparent !important;
 }
-.seg-wrap .seg-y { width: 40px; }
-.seg-wrap .seg-m,
-.seg-wrap .seg-d,
-.seg-wrap .seg-h,
-.seg-wrap .seg-mi { width: 26px; }
+.seg-wrap input.seg-y { width: 40px !important; }
+.seg-wrap input.seg-m,
+.seg-wrap input.seg-d,
+.seg-wrap input.seg-h,
+.seg-wrap input.seg-mi { width: 26px !important; }
 .seg-wrap .seg-sep {
   color: #94a3b8;
   font-size: var(--text-body);
@@ -1697,11 +1702,14 @@ header h1 {
   letter-spacing: 0.01em;
 }
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
-  width: 50px;
+  width: 56px;
 }
 .flatpickr-calendar .flatpickr-current-month {
-  width: 75%;
-  left: 12.5%;
+  width: 80%;
+  left: 10%;
+}
+.flatpickr-calendar .flatpickr-current-month .numInputWrapper span {
+  display: none;
 }
 .flatpickr-calendar .flatpickr-prev-month,
 .flatpickr-calendar .flatpickr-next-month {
