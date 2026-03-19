@@ -1716,6 +1716,11 @@ header h1 {
   background: transparent !important;
   transform: none !important;
 }
+.seg-wrap .seg-spin button:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+  color: #c0c9d4;
+}
 .seg-wrap .seg-spin button svg {
   width: 10px;
   height: 6px;
@@ -1723,6 +1728,12 @@ header h1 {
   display: block;
   flex-shrink: 0;
   margin: 0;
+}
+.seg-wrap .seg-spin button:first-child svg {
+  transform: translateY(9px);
+}
+.seg-wrap .seg-spin button:last-child svg {
+  transform: translateY(-9px);
 }
 .flatpickr-calendar {
   font-family: var(--font-sans);
@@ -1740,7 +1751,7 @@ header h1 {
   padding: 2px 4px 6px;
 }
 .flatpickr-calendar .flatpickr-month {
-  height: 30px;
+  height: 34px;
 }
 .flatpickr-calendar .flatpickr-current-month {
   padding-top: 4px;
@@ -1755,17 +1766,31 @@ header h1 {
 }
 .flatpickr-calendar .flatpickr-current-month input.cur-year {
   width: 64px;
-  min-height: 25px !important;
-  height: auto !important;
-  line-height: 25px;
-  padding: 0;
+  min-height: 24px !important;
+  height: 24px !important;
+  line-height: 24px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  box-sizing: border-box;
   border-radius: 10px;
+}
+.flatpickr-calendar .flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-calendar .flatpickr-current-month .cur-month {
+  min-height: 24px;
+  height: 24px;
+  line-height: 24px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .flatpickr-calendar .flatpickr-current-month .numInputWrapper {
   width: 64px;
   min-width: 64px;
-  min-height: 25px;
-  height: auto;
+  min-height: 24px;
+  height: 24px;
   overflow: visible;
   border-radius: 10px;
 }
@@ -1798,9 +1823,9 @@ header h1 {
 .flatpickr-calendar .flatpickr-rContainer,
 .flatpickr-calendar .flatpickr-days,
 .flatpickr-calendar .flatpickr-weekdays {
-  width: 216px;
-  min-width: 216px;
-  max-width: 216px;
+  width: 210px;
+  min-width: 210px;
+  max-width: 210px;
   margin: 0 auto;
 }
 .flatpickr-calendar .flatpickr-day {
@@ -1808,7 +1833,10 @@ header h1 {
   flex: 0 0 28px;
   max-width: 28px;
   height: 28px;
-  line-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
   color: var(--text);
   border: 1px solid transparent;
   border-radius: 8px;
@@ -1857,9 +1885,9 @@ header h1 {
 }
 .flatpickr-calendar .flatpickr-weekdaycontainer,
 .flatpickr-calendar .dayContainer {
-  width: 216px;
-  min-width: 216px;
-  max-width: 216px;
+  width: 210px;
+  min-width: 210px;
+  max-width: 210px;
 }
 .flatpickr-calendar .flatpickr-weekdays {
   padding-bottom: 4px;
@@ -3577,9 +3605,15 @@ function buildSegTime(hiddenId){
     return hidden.value;
   }
   function stepFocused(delta){
+    if(hidden.disabled || wrap.classList.contains('disabled')){
+      return;
+    }
     const seg = lastFocusedSeg;
     const idx = segs.indexOf(seg);
     if(idx < 0) return;
+    if(seg.disabled){
+      return;
+    }
     let val = parseInt(seg.value, 10);
     if(isNaN(val)) val = 0;
     val += delta;
@@ -3593,8 +3627,16 @@ function buildSegTime(hiddenId){
     seg.value = pad2(val);
     syncToHidden();
   }
-  upBtn.addEventListener('click', () => { stepFocused(1); });
-  downBtn.addEventListener('click', () => { stepFocused(-1); });
+  upBtn.addEventListener('click', () => {
+    if(upBtn.disabled || hidden.disabled || wrap.classList.contains('disabled')) return;
+    stepFocused(1);
+    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  downBtn.addEventListener('click', () => {
+    if(downBtn.disabled || hidden.disabled || wrap.classList.contains('disabled')) return;
+    stepFocused(-1);
+    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   segs.forEach((seg, i) => {
     seg.addEventListener('input', () => {
       seg.value = seg.value.replace(/[^0-9]/g, '');
@@ -3670,7 +3712,13 @@ function initFlatpickrDate(id, onChange){
       if(onChange) onChange();
     },
   });
-  seg.icon.addEventListener('click', () => fp.toggle());
+  // Use a replaceable handler so repeated init does not keep stale flatpickr instances.
+  seg.icon.onclick = () => {
+    const current = fpInstances[id];
+    if(current){
+      current.toggle();
+    }
+  };
   seg.segs.forEach(s => {
     s.addEventListener('change', () => { if(onChange) onChange(); });
   });
@@ -3734,7 +3782,13 @@ function initFlatpickrDateTime(dateId, timeId, onChange){
       if(onChange) onChange();
     },
   });
-  dateSeg.icon.addEventListener('click', () => fp.toggle());
+  // Use a replaceable handler so repeated init does not keep stale flatpickr instances.
+  dateSeg.icon.onclick = () => {
+    const current = fpInstances[dateId];
+    if(current){
+      current.toggle();
+    }
+  };
   dateSeg.segs.forEach(s => {
     s.addEventListener('change', () => { if(onChange) onChange(); });
   });
@@ -5444,6 +5498,7 @@ function syncDateTimeInputPairState(dateId, timeId){
     timeSeg.segs.forEach(s => { s.disabled = timeDisabled; });
     const spinBtns = timeSeg.wrap.querySelectorAll('.seg-spin button');
     spinBtns.forEach(b => { b.disabled = timeDisabled; });
+    timeInput.disabled = timeDisabled;
   } else {
     timeInput.disabled = !hasControlAccess || !hasDate;
   }
