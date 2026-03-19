@@ -4809,6 +4809,7 @@ let leftPaneVisible = true;
 let pendingAutomaticDetailSync = false;
 let detailPointerDown = false;
 let detailInteractionLockUntil = 0;
+const detailExpandedEventKeysByPath = new Map();
 let detailKeywordFilterTerm = '';
 let detailKeywordSearchTerm = '';
 let detailKeywordCurrentMatchIndex = -1;
@@ -5114,6 +5115,41 @@ function getDetailEventKey(ev, fallbackIndex){
   return `${ev && ev.kind ? ev.kind : 'event'}:${ev && ev.timestamp ? ev.timestamp : ''}:${fallbackIndex}`;
 }
 
+function getExpandedDetailEventKeySet(path){
+  if(!path){
+    return null;
+  }
+  let keys = detailExpandedEventKeysByPath.get(path);
+  if(!keys){
+    keys = new Set();
+    detailExpandedEventKeysByPath.set(path, keys);
+  }
+  return keys;
+}
+
+function isDetailEventBodyExpanded(path, eventKey){
+  const keys = path ? detailExpandedEventKeysByPath.get(path) : null;
+  if(!keys || !eventKey){
+    return false;
+  }
+  return keys.has(eventKey);
+}
+
+function setDetailEventBodyExpanded(path, eventKey, expanded){
+  if(!path || !eventKey){
+    return;
+  }
+  const keys = getExpandedDetailEventKeySet(path);
+  if(!keys){
+    return;
+  }
+  if(expanded){
+    keys.add(eventKey);
+  } else {
+    keys.delete(eventKey);
+  }
+}
+
 function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta){
   const role = ev.role || 'system';
   const roleLabel = role.replace('_', ' ');
@@ -5124,7 +5160,7 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
   const bodyText = getEventBodyText(ev);
   const eventMatches = searchMeta && searchMeta.matchesByEvent ? (searchMeta.matchesByEvent.get(eventKey) || []) : [];
   const bodyInner = `<pre>${renderHighlightedEventBody(bodyText, eventMatches)}</pre>`;
-  const body = `<div class="ev-body-wrap">${bodyInner}<button class="ev-body-toggle">${esc(t('detail.bodyExpand'))}</button></div>`;
+  const body = `<div class="ev-body-wrap" data-event-key="${esc(eventKey)}">${bodyInner}<button class="ev-body-toggle">${esc(t('detail.bodyExpand'))}</button></div>`;
   const selectionKey = getEventSelectionKey(ev);
   const isSelectable = state.isEventSelectionMode && isSelectableMessageEvent(ev);
   const isSelected = selectionKey && state.selectedEventIds.has(selectionKey);
@@ -5179,14 +5215,24 @@ function attachVisibleEventCardHandlers(eventsBox){
     const lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) * 1.65);
     const threshold = lineHeight * 20 + 20;
     if(pre.scrollHeight > threshold){
-      wrap.classList.add('collapsible', 'collapsed');
+      const eventKey = wrap.dataset.eventKey || '';
+      const isExpanded = isDetailEventBodyExpanded(state.activePath, eventKey);
+      wrap.classList.add('collapsible');
+      wrap.classList.toggle('collapsed', !isExpanded);
+      const button = wrap.querySelector('.ev-body-toggle');
+      if(button){
+        button.textContent = isExpanded ? t('detail.bodyCollapse') : t('detail.bodyExpand');
+      }
     }
   });
   eventsBox.querySelectorAll('.ev-body-toggle').forEach(button => {
     button.onclick = () => {
+      noteDetailInteraction();
       const wrap = button.closest('.ev-body-wrap');
       if(!wrap) return;
       const isCollapsed = wrap.classList.toggle('collapsed');
+      const eventKey = wrap.dataset.eventKey || '';
+      setDetailEventBodyExpanded(state.activePath, eventKey, !isCollapsed);
       button.textContent = isCollapsed ? t('detail.bodyExpand') : t('detail.bodyCollapse');
     };
   });
@@ -6123,11 +6169,11 @@ function focusDetailKeywordMatch(eventsBox, matchIndex){
 }
 
 function isAutomaticSessionsLoadMode(mode){
-  return mode === 'auto' || mode === 'focus' || mode === 'labels';
+  return mode === 'auto' || mode === 'focus';
 }
 
 function shouldSyncActiveSessionAfterListLoad(mode){
-  return mode !== 'auto';
+  return mode === 'labels' || mode === 'reload' || mode === 'clear' || mode === 'initial';
 }
 
 function clearDeferredDetailSyncTimer(){
@@ -6830,9 +6876,6 @@ function getDisplayEvents(){
       const rawIndexByEvent = new Map(activeEvents.map((ev, index) => [ev, index]));
       if(selectedIndex >= 0){
         events = events.filter(ev => {
-          if(ev.kind !== 'message'){
-            return false;
-          }
           const rawIndex = rawIndexByEvent.get(ev);
           if(typeof rawIndex !== 'number'){
             return false;
@@ -7833,9 +7876,12 @@ document.getElementById('add_session_label').addEventListener('click', async (ev
   await addSessionLabelFromButton(event.currentTarget);
 });
 document.getElementById('events').addEventListener('pointerdown', (event) => {
+  if(!event.target.closest('.ev')){
+    return;
+  }
+  noteDetailInteraction();
   if(event.target.closest('pre')){
     detailPointerDown = true;
-    noteDetailInteraction();
   }
 });
 window.addEventListener('pointerup', () => {
@@ -7873,10 +7919,6 @@ window.addEventListener('message', async (event) => {
   if(!event.data || event.data.type !== 'labels-updated') return;
   await loadLabels(false);
   await loadSessions({ mode: 'labels' });
-});
-window.addEventListener('focus', async () => {
-  await loadLabels(false);
-  await loadSessions({ mode: 'focus' });
 });
 window.addEventListener('storage', (event) => {
   if(event.key !== LANGUAGE_STORAGE_KEY){
