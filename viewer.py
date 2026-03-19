@@ -1319,6 +1319,7 @@ header h1 {
   font-weight: 600;
   letter-spacing: 0.01em;
   line-height: 1.35;
+  white-space: pre-line;
 }
 .header-meta {
   display: grid;
@@ -3056,7 +3057,7 @@ pre {
         <div>
           <div class="section-kicker">Session Browser</div>
           <div class="toolbar-heading">検索と絞り込み</div>
-          <div class="toolbar-copy">候補を探してから一覧を見る、という流れに整理しました。</div>
+          <div class="toolbar-copy">フィルターは次回起動時にも保持されます。</div>
         </div>
         <div class="toolbar-utility">
           <button id="reload" class="primary-action" title="F5">Reload</button>
@@ -3932,7 +3933,7 @@ const SUPPORTED_LANGUAGES = ['ja', 'en', 'zh-Hans', 'zh-Hant'];
 const I18N = {
   ja: {
     'language.selector': '言語',
-    'header.subtitle': 'Session logs, labels, and event review for Codex workflows',
+    'header.subtitle': 'CodexCLIのイベント履歴を一覧・詳細表示表示して、検索することができます。\\n覚えておきたい内容にラベルを貼り付けて、あとから検索することもできます。',
     'header.shortcuts': 'ショートカット',
     'header.meta.show': 'メタ表示',
     'header.meta.hide': 'メタ非表示',
@@ -3943,7 +3944,7 @@ const I18N = {
     'header.labels': 'ラベル管理',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '検索と絞り込み',
-    'toolbar.copy': '候補を探してから一覧を見る、という流れに整理しました。',
+    'toolbar.copy': 'フィルターは次回起動時にも保持されます。',
     'toolbar.reload': 'Reload',
     'toolbar.clear': 'Clear',
     'toolbar.filters.hide': 'フィルタを隠す',
@@ -3984,7 +3985,7 @@ const I18N = {
     'detail.toggle.turn': '各入力と最終応答のみ',
     'detail.toggle.reverse': '表示順を逆にする',
     'detail.label': 'イベントラベル',
-    'detail.label.all': 'label',
+    'detail.label.all': 'all',
     'detail.refresh': 'Refresh',
     'detail.refreshing': 'Refreshing...',
     'detail.clear': 'Clear',
@@ -4093,7 +4094,7 @@ const I18N = {
   },
   en: {
     'language.selector': 'Language',
-    'header.subtitle': 'Session logs, labels, and event review for Codex workflows',
+    'header.subtitle': 'Browse, inspect, and search CodexCLI event histories.\\nYou can also attach labels to anything worth remembering and find it later.',
     'header.shortcuts': 'Shortcuts',
     'header.meta.show': 'Show meta',
     'header.meta.hide': 'Hide meta',
@@ -4104,7 +4105,7 @@ const I18N = {
     'header.labels': 'Labels',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': 'Search and filter',
-    'toolbar.copy': 'Find candidates first, then review the list.',
+    'toolbar.copy': 'Filters are preserved the next time you launch the viewer.',
     'toolbar.reload': 'Reload',
     'toolbar.clear': 'Clear',
     'toolbar.filters.hide': 'Hide filters',
@@ -4145,7 +4146,7 @@ const I18N = {
     'detail.toggle.turn': 'Only each input and final reply',
     'detail.toggle.reverse': 'Reverse order',
     'detail.label': 'Event label',
-    'detail.label.all': 'label',
+    'detail.label.all': 'all',
     'detail.refresh': 'Refresh',
     'detail.refreshing': 'Refreshing...',
     'detail.clear': 'Clear',
@@ -4254,7 +4255,7 @@ const I18N = {
   },
   'zh-Hans': {
     'language.selector': '语言',
-    'header.subtitle': '用于 Codex 工作流的会话日志、标签和事件查看',
+    'header.subtitle': '可以列表和详细查看 CodexCLI 的事件历史，并进行搜索。\\n还可以给想保留的内容加上标签，之后再搜索找到。',
     'header.shortcuts': '快捷键',
     'header.meta.show': '显示元信息',
     'header.meta.hide': '隐藏元信息',
@@ -4265,7 +4266,7 @@ const I18N = {
     'header.labels': '标签管理',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '搜索与筛选',
-    'toolbar.copy': '先找到候选项，再查看列表。',
+    'toolbar.copy': '筛选条件会在下次启动时继续保留。',
     'toolbar.reload': 'Reload',
     'toolbar.clear': 'Clear',
     'toolbar.filters.hide': '隐藏筛选',
@@ -4306,7 +4307,7 @@ const I18N = {
     'detail.toggle.turn': '仅显示每次输入与最终回复',
     'detail.toggle.reverse': '反转显示顺序',
     'detail.label': '事件标签',
-    'detail.label.all': 'label',
+    'detail.label.all': 'all',
     'detail.refresh': 'Refresh',
     'detail.refreshing': 'Refreshing...',
     'detail.clear': 'Clear',
@@ -4417,7 +4418,7 @@ const I18N = {
 I18N['zh-Hant'] = {
   ...I18N['zh-Hans'],
   'language.selector': '語言',
-  'header.subtitle': '用於 Codex 工作流程的工作階段日誌、標籤與事件檢視',
+  'header.subtitle': '可以列表與詳細查看 CodexCLI 的事件歷史，並進行搜尋。\\n還可以替想保留的內容加上標籤，之後再搜尋找到。',
   'header.meta.show': '顯示中繼資訊',
   'header.meta.hide': '隱藏中繼資訊',
   'header.list.hide': '隱藏工作階段列表',
@@ -4426,7 +4427,7 @@ I18N['zh-Hant'] = {
   'header.list.showShort': '顯示列表',
   'header.labels': '標籤管理',
   'toolbar.heading': '搜尋與篩選',
-  'toolbar.copy': '先找到候選項，再查看列表。',
+  'toolbar.copy': '篩選條件會在下次啟動時繼續保留。',
   'toolbar.filters.hide': '隱藏篩選',
   'toolbar.filters.show': '顯示篩選',
   'search.title': '搜尋',
@@ -4457,6 +4458,7 @@ I18N['zh-Hant'] = {
   'detail.toggle.turn': '僅顯示每次輸入與最終回覆',
   'detail.toggle.reverse': '反轉顯示順序',
   'detail.label': '事件標籤',
+  'detail.label.all': 'all',
   'detail.refresh': '刷新',
   'detail.refreshing': '正在刷新...',
   'detail.clear': '清除',
