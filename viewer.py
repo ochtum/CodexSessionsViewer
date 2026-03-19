@@ -4815,6 +4815,7 @@ let detailKeywordSearchTerm = '';
 let detailKeywordCurrentMatchIndex = -1;
 let pendingDetailKeywordFocusIndex = -1;
 let detailKeywordSearchTotal = 0;
+let pendingEventsScrollRestoreTop = null;
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -5173,7 +5174,7 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
     ? `<label class="event-range-toggle"><input type="radio" name="message-range-selection" class="event-range-radio" data-event-id="${esc(selectionKey)}" ${isRangeSelected ? 'checked' : ''} />${esc(t('detail.rangeMode'))}</label>`
     : '';
   const labelsHtml = renderAssignedLabels(labels, 'event', { eventId: ev.event_id });
-  const copyButtonHtml = ev.kind === 'message'
+  const copyButtonHtml = getCopyableEventText(ev) && ev.event_id
     ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">${esc(t('copy.single'))}</button>`
     : '';
   const systemLabelsHtml = systemLabels.map(label => `<span class="badge-kind badge-system-label">${esc(label)}</span>`).join('');
@@ -5243,9 +5244,22 @@ function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchM
     ? searchMeta.matches[pendingDetailKeywordFocusIndex] || null
     : null;
   const previousScrollTop = eventsBox.scrollTop;
+  const targetScrollTop = Number.isFinite(pendingEventsScrollRestoreTop)
+    ? pendingEventsScrollRestoreTop
+    : previousScrollTop;
   eventsBox.innerHTML = displayEvents.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index, searchMeta)).join('');
-  eventsBox.scrollTop = previousScrollTop;
+  eventsBox.scrollTop = targetScrollTop;
   attachVisibleEventCardHandlers(eventsBox);
+  if(Number.isFinite(pendingEventsScrollRestoreTop)){
+    const lockedScrollTop = pendingEventsScrollRestoreTop;
+    pendingEventsScrollRestoreTop = null;
+    // Radio selection can trigger browser-driven focus scrolling after rerender.
+    requestAnimationFrame(() => {
+      if(document.getElementById('events') === eventsBox){
+        eventsBox.scrollTop = lockedScrollTop;
+      }
+    });
+  }
   if(targetMatch){
     requestAnimationFrame(() => {
       focusDetailKeywordMatch(eventsBox, pendingDetailKeywordFocusIndex);
@@ -5370,14 +5384,14 @@ function parseDateInputToIso(raw){
     .replace(/[年月]/g, '/')
     .replace(/日/g, ' ')
     .replace(/[．。]/g, '.')
-    .replace(/\s*\/\s*/g, '/')
-    .replace(/\s+/g, ' ');
-  let m = canonical.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    .replace(/\\s*\\/\\s*/g, '/')
+    .replace(/\\s+/g, ' ');
+  let m = canonical.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})$/);
   if(!m){
-    m = canonical.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    m = canonical.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})$/);
   }
   if(!m){
-    m = canonical.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+    m = canonical.match(/(\\d{4})[\\/\\-\\.](\\d{1,2})[\\/\\-\\.](\\d{1,2})/);
   }
   if(!m){
     return '';
@@ -5398,7 +5412,7 @@ function parseDateInputToIso(raw){
 function formatDateInputFromIso(isoValue){
   const iso = parseDateInputToIso(isoValue);
   if(!iso) return '';
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const m = iso.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);
   if(!m) return '';
   return `${m[1]} / ${m[2]} / ${m[3]}`;
 }
@@ -5418,14 +5432,14 @@ function parseDateTimeInputToIso(raw){
     .replace(/日/g, ' ')
     .replace(/[：]/g, ':')
     .replace(/[．。]/g, '.')
-    .replace(/\s*\/\s*/g, '/')
-    .replace(/\s+/g, ' ');
-  let m = canonical.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::\d{2})?$/);
+    .replace(/\\s*\\/\\s*/g, '/')
+    .replace(/\\s+/g, ' ');
+  let m = canonical.match(/^(\\d{4})-(\\d{2})-(\\d{2})[T ](\\d{2}):(\\d{2})(?::\\d{2})?$/);
   if(!m){
-    m = canonical.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2}) (\d{1,2}):(\d{2})(?::\d{1,2})?$/);
+    m = canonical.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2}) (\\d{1,2}):(\\d{2})(?::\\d{1,2})?$/);
   }
   if(!m){
-    m = canonical.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})[ T](\d{1,2}):(\d{1,2})(?::\d{1,2})?/);
+    m = canonical.match(/(\\d{4})[\\/\\-\\.](\\d{1,2})[\\/\\-\\.](\\d{1,2})[ T](\\d{1,2}):(\\d{1,2})(?::\\d{1,2})?/);
   }
   if(!m){
     return '';
@@ -5456,7 +5470,7 @@ function parseDateTimeInputToIso(raw){
 function formatDateTimeInputFromIso(isoValue){
   const iso = parseDateTimeInputToIso(isoValue);
   if(!iso) return '';
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  const m = iso.match(/^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})$/);
   if(!m) return '';
   return `${m[1]} / ${m[2]} / ${m[3]} ${m[4]}:${m[5]}`;
 }
@@ -5472,8 +5486,8 @@ function parseTimeInputToValue(raw){
   if(!trimmed) return '';
   const canonical = trimmed
     .replace(/[：]/g, ':')
-    .replace(/\s+/g, '');
-  const m = canonical.match(/^(\d{1,2}):(\d{2})(?::\d{1,2})?$/);
+    .replace(/\\s+/g, '');
+  const m = canonical.match(/^(\\d{1,2}):(\\d{2})(?::\\d{1,2})?$/);
   if(!m){
     return '';
   }
@@ -5497,7 +5511,7 @@ function buildDateTimeIsoFromParts(dateRaw, timeRaw, boundary){
 function extractTimeInputFromIso(isoValue){
   const iso = parseDateTimeInputToIso(isoValue);
   if(!iso) return '';
-  const m = iso.match(/T(\d{2}):(\d{2})$/);
+  const m = iso.match(/T(\\d{2}):(\\d{2})$/);
   if(!m) return '';
   return `${m[1]}:${m[2]}`;
 }
@@ -5687,12 +5701,12 @@ function setupDateTimeSegmentInput(input){
     selectDateTimeSegment(input, getDateTimeSegmentIndexByPos(input.selectionStart || 0));
   });
   input.addEventListener('keydown', (event) => {
-    if(!/^\d$/.test(event.key) && event.key !== 'Backspace' && event.key !== 'Delete' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Tab' && event.key !== '/' && event.key !== ':' && event.key !== ' '){
+    if(!/^\\d$/.test(event.key) && event.key !== 'Backspace' && event.key !== 'Delete' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Tab' && event.key !== '/' && event.key !== ':' && event.key !== ' '){
       return;
     }
     ensureSkeleton();
     let segmentIndex = getDateTimeSegmentIndexByPos(input.selectionStart || 0);
-    if(/^\d$/.test(event.key)){
+    if(/^\\d$/.test(event.key)){
       event.preventDefault();
       const seg = DATETIME_INPUT_SEGMENTS[segmentIndex];
       const current = input.value.slice(seg.start, seg.end);
@@ -5819,12 +5833,12 @@ function setupDateSegmentInput(input){
     selectDateSegment(input, getDateSegmentIndexByPos(input.selectionStart || 0));
   });
   input.addEventListener('keydown', (event) => {
-    if(!/^\d$/.test(event.key) && event.key !== 'Backspace' && event.key !== 'Delete' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Tab' && event.key !== '/' && event.key !== ' '){
+    if(!/^\\d$/.test(event.key) && event.key !== 'Backspace' && event.key !== 'Delete' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Tab' && event.key !== '/' && event.key !== ' '){
       return;
     }
     ensureSkeleton();
     const segmentIndex = getDateSegmentIndexByPos(input.selectionStart || 0);
-    if(/^\d$/.test(event.key)){
+    if(/^\\d$/.test(event.key)){
       event.preventDefault();
       const seg = DATE_INPUT_SEGMENTS[segmentIndex];
       const current = input.value.slice(seg.start, seg.end);
@@ -6019,6 +6033,11 @@ function getEventBodyText(ev){
   } catch (error) {
     return '';
   }
+}
+
+function getCopyableEventText(ev){
+  const text = getEventBodyText(ev);
+  return text && text.trim() ? text : '';
 }
 
 function buildDetailKeywordSearchMeta(displayEvents, keyword){
@@ -6273,16 +6292,20 @@ async function copyTextToClipboard(text){
   return copied;
 }
 
-function getDisplayMessageEvents(){
-  return getDisplayEvents().filter(ev => ev.kind === 'message' && (ev.text || '').trim());
-}
-
 function getEventSelectionKey(ev){
   return ev && ev.event_id ? String(ev.event_id) : '';
 }
 
+function getDisplayCopyableEvents(){
+  return getDisplayEvents().filter(ev => !!getCopyableEventText(ev));
+}
+
+function isCopyableMessageEvent(ev){
+  return ev && ev.kind === 'message' && !!getCopyableEventText(ev);
+}
+
 function isSelectableMessageEvent(ev){
-  return ev && ev.kind === 'message' && (ev.text || '').trim() && getEventSelectionKey(ev);
+  return isCopyableMessageEvent(ev) && getEventSelectionKey(ev);
 }
 
 function getSelectableDisplayMessageEvents(){
@@ -6334,7 +6357,7 @@ function updateDisplayedMessagesCopyButtonState(){
     button.disabled = true;
     return;
   }
-  const hasMessages = !!getDisplayMessageEvents().length;
+  const hasMessages = !!getDisplayCopyableEvents().length;
   button.disabled = state.isDetailLoading || !hasMessages;
 }
 
@@ -6923,9 +6946,11 @@ function getDisplayEvents(){
 
 function formatCopiedMessages(events){
   return events.map(ev => {
-    const role = ev.role || 'system';
+    const label = ev.kind === 'message'
+      ? (ev.role || 'system')
+      : (ev.kind || 'event');
     const timestamp = fmt(ev.timestamp) || ev.timestamp || '-';
-    return `[${role}] ${timestamp}\n${ev.text || ''}`;
+    return `[${label}] ${timestamp}\n${getCopyableEventText(ev)}`;
   }).join('\\n\\n-----\\n\\n');
 }
 
@@ -6988,7 +7013,7 @@ async function removeEventLabel(eventId, labelId){
 }
 
 async function copyDisplayedMessages(){
-  const messages = getDisplayMessageEvents();
+  const messages = getDisplayCopyableEvents();
   if(!messages.length){
     return;
   }
@@ -7017,11 +7042,12 @@ async function copySelectedMessages(){
 }
 
 async function copyEventMessage(button, eventId){
-  const event = (state.activeEvents || []).find(ev => ev.event_id === eventId && ev.kind === 'message');
-  if(!event || !event.text){
+  const event = (state.activeEvents || []).find(ev => ev.event_id === eventId);
+  const text = getCopyableEventText(event);
+  if(!text){
     return;
   }
-  const copied = await copyTextToClipboard(event.text);
+  const copied = await copyTextToClipboard(text);
   if(copied){
     flashButtonLabel(button, t('copy.copied'), t('copy.single'));
   }
@@ -7070,6 +7096,8 @@ function updateMessageRangeSelection(eventId){
   if(!key){
     return;
   }
+  const eventsBox = document.getElementById('events');
+  pendingEventsScrollRestoreTop = eventsBox ? eventsBox.scrollTop : null;
   noteDetailInteraction();
   state.selectedMessageRangeEventId = key;
   renderActiveSession();
