@@ -916,6 +916,107 @@ def remove_event_label(path: Path, event_id: str, label_id: int):
             conn.close()
 
 
+def fetch_labeled_items(label_id=None):
+    with _SEARCH_INDEX_LOCK:
+        conn = open_search_index_connection()
+        try:
+            label_filter = ''
+            params_s = []
+            params_e = []
+            if label_id is not None:
+                label_filter = ' AND sl.label_id = ?'
+                params_s = [label_id]
+                label_filter_e = ' AND el.label_id = ?'
+                params_e = [label_id]
+            else:
+                label_filter_e = ''
+
+            session_rows = conn.execute(
+                f'''
+                SELECT DISTINCT si.path, si.relative_path, si.mtime_iso, si.session_id,
+                       si.started_at, si.cwd, si.model, si.source,
+                       si.first_user_text, si.first_real_user_text
+                FROM session_label_links sl
+                JOIN session_index si ON si.path = sl.session_path
+                WHERE 1=1{label_filter}
+                ORDER BY CASE WHEN si.started_at IS NOT NULL AND si.started_at <> '' THEN si.started_at ELSE si.mtime_iso END DESC
+                ''',
+                params_s,
+            ).fetchall()
+
+            labeled_sessions = []
+            for row in session_rows:
+                labels = conn.execute(
+                    '''
+                    SELECT l.id, l.name, l.color_value, l.color_family
+                    FROM session_label_links sl2
+                    JOIN labels l ON l.id = sl2.label_id
+                    WHERE sl2.session_path = ?
+                    ORDER BY l.name COLLATE NOCASE ASC, l.id ASC
+                    ''',
+                    (row['path'],),
+                ).fetchall()
+                labeled_sessions.append({
+                    'path': row['path'],
+                    'relative_path': row['relative_path'],
+                    'mtime': row['mtime_iso'],
+                    'session_id': row['session_id'],
+                    'started_at': row['started_at'],
+                    'cwd': row['cwd'],
+                    'model': row['model'],
+                    'source': row['source'],
+                    'first_user_text': row['first_user_text'],
+                    'first_real_user_text': row['first_real_user_text'],
+                    'labels': [label_row_to_dict(l) for l in labels],
+                })
+
+            event_rows = conn.execute(
+                f'''
+                SELECT el.session_path, el.event_id,
+                       si.relative_path, si.mtime_iso, si.session_id,
+                       si.started_at, si.cwd, si.model, si.source,
+                       si.first_user_text, si.first_real_user_text
+                FROM event_label_links el
+                JOIN session_index si ON si.path = el.session_path
+                WHERE 1=1{label_filter_e}
+                GROUP BY el.session_path, el.event_id
+                ORDER BY CASE WHEN si.started_at IS NOT NULL AND si.started_at <> '' THEN si.started_at ELSE si.mtime_iso END DESC
+                ''',
+                params_e,
+            ).fetchall()
+
+            labeled_events = []
+            for row in event_rows:
+                labels = conn.execute(
+                    '''
+                    SELECT l.id, l.name, l.color_value, l.color_family
+                    FROM event_label_links el2
+                    JOIN labels l ON l.id = el2.label_id
+                    WHERE el2.session_path = ? AND el2.event_id = ?
+                    ORDER BY l.name COLLATE NOCASE ASC, l.id ASC
+                    ''',
+                    (row['session_path'], row['event_id']),
+                ).fetchall()
+                labeled_events.append({
+                    'session_path': row['session_path'],
+                    'event_id': row['event_id'],
+                    'relative_path': row['relative_path'],
+                    'mtime': row['mtime_iso'],
+                    'session_id': row['session_id'],
+                    'started_at': row['started_at'],
+                    'cwd': row['cwd'],
+                    'model': row['model'],
+                    'source': row['source'],
+                    'first_user_text': row['first_user_text'],
+                    'first_real_user_text': row['first_real_user_text'],
+                    'labels': [label_row_to_dict(l) for l in labels],
+                })
+
+            return {'sessions': labeled_sessions, 'events': labeled_events}
+        finally:
+            conn.close()
+
+
 def get_session_signature(path: Path, stat_result=None, signature=None):
     st = stat_result if stat_result is not None else path.stat()
     sig = signature if signature is not None else (st.st_mtime_ns, st.st_size)
@@ -3044,6 +3145,7 @@ pre {
         <option value="zh-Hant">繁體中文</option>
       </select>
       <button id="open_label_manager" class="utility-action">ラベル管理</button>
+      <button id="open_labeled_items" class="utility-action">ラベル付き一覧</button>
       <button id="toggle_meta" class="utility-action" title="M">メタ表示</button>
       <button id="open_shortcuts" class="utility-action" title="ショートカット一覧を表示">ショートカット</button>
       <button id="toggle_session_list_mobile" class="utility-action">一覧を隠す</button>
@@ -3942,6 +4044,7 @@ const I18N = {
     'header.list.hideShort': '一覧を隠す',
     'header.list.showShort': '一覧を表示',
     'header.labels': 'ラベル管理',
+    'header.labeledItems': 'ラベル付き一覧',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '検索と絞り込み',
     'toolbar.copy': 'フィルターは次回起動時にも保持されます。',
@@ -4103,6 +4206,7 @@ const I18N = {
     'header.list.hideShort': 'Hide list',
     'header.list.showShort': 'Show list',
     'header.labels': 'Labels',
+    'header.labeledItems': 'Labeled Items',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': 'Search and filter',
     'toolbar.copy': 'Filters are preserved the next time you launch the viewer.',
@@ -4264,6 +4368,7 @@ const I18N = {
     'header.list.hideShort': '隐藏列表',
     'header.list.showShort': '显示列表',
     'header.labels': '标签管理',
+    'header.labeledItems': '已标记项目',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '搜索与筛选',
     'toolbar.copy': '筛选条件会在下次启动时继续保留。',
@@ -4426,6 +4531,7 @@ I18N['zh-Hant'] = {
   'header.list.hideShort': '隱藏列表',
   'header.list.showShort': '顯示列表',
   'header.labels': '標籤管理',
+  'header.labeledItems': '已標記項目',
   'toolbar.heading': '搜尋與篩選',
   'toolbar.copy': '篩選條件會在下次啟動時繼續保留。',
   'toolbar.filters.hide': '隱藏篩選',
@@ -4648,6 +4754,7 @@ function applyMainLanguage(){
   setTextById('open_shortcuts', t('header.shortcuts'));
   document.getElementById('open_shortcuts').setAttribute('title', t('header.shortcuts'));
   setTextById('open_label_manager', t('header.labels'));
+  setTextById('open_labeled_items', t('header.labeledItems'));
   setText('.toolbar .section-kicker', t('toolbar.kicker'));
   setText('.toolbar .toolbar-heading', t('toolbar.heading'));
   setText('.toolbar .toolbar-copy', t('toolbar.copy'));
@@ -5322,6 +5429,16 @@ function openLabelManagerWindow(){
     return;
   }
   labelManagerWindow = window.open(`/labels?lang=${encodeURIComponent(uiLanguage)}`, 'codex_label_manager', features);
+}
+
+let labeledItemsWindow = null;
+function openLabeledItemsWindow(){
+  const features = 'width=900,height=720,resizable=yes,scrollbars=yes';
+  if(labeledItemsWindow && !labeledItemsWindow.closed){
+    labeledItemsWindow.focus();
+    return;
+  }
+  labeledItemsWindow = window.open(`/labeled-items?lang=${encodeURIComponent(uiLanguage)}`, 'codex_labeled_items', features);
 }
 
 function highlightSessionPath(s){
@@ -7930,6 +8047,7 @@ document.addEventListener('selectionchange', () => {
   scheduleDeferredAutomaticDetailSync();
 });
 document.getElementById('open_label_manager').addEventListener('click', openLabelManagerWindow);
+document.getElementById('open_labeled_items').addEventListener('click', openLabeledItemsWindow);
 document.addEventListener('click', (event) => {
   const picker = document.getElementById('label_picker');
   if(picker.classList.contains('hidden')) return;
@@ -7945,6 +8063,16 @@ document.getElementById('shortcut_dialog').addEventListener('click', (event) => 
 });
 window.addEventListener('message', async (event) => {
   if(event.origin !== location.origin) return;
+  if(event.data && event.data.type === 'open-session' && event.data.path){
+    await openSession(event.data.path);
+    if(event.data.eventId){
+      setTimeout(() => {
+        const el = document.querySelector(`.ev[data-event-id="${CSS.escape(event.data.eventId)}"]`);
+        if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 600);
+    }
+    return;
+  }
   if(labelManagerWindow && !labelManagerWindow.closed && event.source !== labelManagerWindow) return;
   if(!event.data || event.data.type !== 'labels-updated') return;
   await loadLabels(false);
@@ -9119,6 +9247,667 @@ loadLabels();
 """
 
 
+LABELED_ITEMS_PAGE = """<!doctype html>
+<html lang=\"ja\">
+<head>
+<meta charset=\"utf-8\" />
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+<title>ラベル付き一覧</title>
+<link rel=\"icon\" href=\"/icons/codex-sessions-viewer.svg\" type=\"image/svg+xml\" />
+<style>
+:root {
+  --bg: #f5f8ff;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --line: rgba(148, 163, 184, 0.28);
+  --line-strong: rgba(148, 163, 184, 0.52);
+  --text: #0f172a;
+  --muted: #546277;
+  --accent: #0f766e;
+  --accent-strong: #0b5c57;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --danger: #be123c;
+  --shadow: 0 28px 70px rgba(15, 23, 42, 0.14);
+  --shadow-soft: 0 16px 36px rgba(15, 23, 42, 0.1);
+  --font-sans: "Aptos", "Segoe UI", "Yu Gothic UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --text-kicker: 10px;
+  --text-label: 11px;
+  --text-caption: 12px;
+  --text-body: 13px;
+  --text-title-sm: 16px;
+  --text-title-md: 18px;
+  --text-title-lg: 20px;
+  --text-display: clamp(28px, 1.55vw, 32px);
+  --text-display-compact: 28px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 18px;
+  --space-8: 24px;
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  margin: 0;
+  position: relative;
+  overflow-x: hidden;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(59, 130, 246, 0.18), transparent 24%),
+    radial-gradient(circle at 88% 14%, rgba(15, 118, 110, 0.16), transparent 22%),
+    linear-gradient(180deg, #eef6ff 0%, #f8fbff 54%, #eef4fb 100%);
+  color: var(--text);
+}
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  width: 320px;
+  height: 320px;
+  border-radius: 999px;
+  filter: blur(36px);
+  pointer-events: none;
+  opacity: 0.55;
+}
+body::before {
+  bottom: -60px;
+  left: -60px;
+  background: radial-gradient(circle, rgba(15, 118, 110, 0.18), transparent 60%);
+}
+body::after {
+  top: -100px;
+  right: -60px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.14), transparent 60%);
+}
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+  position: relative;
+}
+.page-header {
+  margin-bottom: 28px;
+}
+.page-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.eyebrow {
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.hero-title {
+  font-size: var(--text-display);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  margin: 0;
+  color: var(--text);
+}
+.hero-copy {
+  font-size: var(--text-body);
+  color: var(--muted);
+  margin: 6px 0 0;
+  max-width: 520px;
+  white-space: pre-line;
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.language-select {
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.filter-row label {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--muted);
+}
+.filter-row select {
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  color: var(--text);
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  min-width: 160px;
+  cursor: pointer;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-soft);
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  backdrop-filter: blur(12px);
+}
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.panel-kicker {
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.panel-title {
+  font-size: var(--text-title-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+.panel-chip {
+  font-size: var(--text-label);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+}
+.item-card {
+  display: block;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.item-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.3);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+.item-type-badge {
+  display: inline-block;
+  font-size: var(--text-kicker);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.item-type-badge.session-type {
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent);
+}
+.item-type-badge.event-type {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+.item-meta {
+  font-size: var(--text-caption);
+  color: var(--muted);
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.item-meta span {
+  white-space: nowrap;
+}
+.item-preview {
+  font-size: var(--text-body);
+  color: var(--text);
+  margin-top: 6px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.item-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-label);
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.label-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.empty-message {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--muted);
+  font-size: var(--text-body);
+}
+.summary-counts {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.summary-count {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.summary-count strong {
+  color: var(--text);
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-header">
+    <div class="page-header-top">
+      <div>
+        <div class="eyebrow" id="page_eyebrow">Labeled Items</div>
+        <h1 class="hero-title" id="page_title">ラベル付き一覧</h1>
+        <p class="hero-copy" id="page_copy">ラベルが付けられたセッションとイベントの一覧です。</p>
+      </div>
+      <div class="page-actions">
+        <select id="language_selector" class="language-select"></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="filter-row">
+    <label id="filter_label_text" for="label_filter">ラベル:</label>
+    <select id="label_filter">
+      <option value="">すべて</option>
+    </select>
+  </div>
+
+  <div id="sessions_panel" class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker" id="sessions_kicker">Labeled Sessions</div>
+        <div class="panel-title" id="sessions_title">ラベル付きセッション</div>
+      </div>
+      <div class="panel-chip" id="sessions_count_badge">0</div>
+    </div>
+    <div id="sessions_list"></div>
+  </div>
+
+  <div id="events_panel" class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker" id="events_kicker">Labeled Events</div>
+        <div class="panel-title" id="events_title">ラベル付きイベント</div>
+      </div>
+      <div class="panel-chip" id="events_count_badge">0</div>
+    </div>
+    <div id="events_list"></div>
+  </div>
+</div>
+
+<script>
+const LANGUAGE_STORAGE_KEY = 'codex_sessions_viewer_language_v1';
+const SUPPORTED_LANGUAGES = ['ja', 'en', 'zh-Hans', 'zh-Hant'];
+const LI_I18N = {
+  ja: {
+    'page.eyebrow': 'Labeled Items',
+    'page.heroTitle': 'ラベル付き一覧',
+    'page.heroCopy': 'ラベルが付けられたセッションとイベントの一覧です。',
+    'filter.label': 'ラベル:',
+    'filter.all': 'すべて',
+    'sessions.kicker': 'Labeled Sessions',
+    'sessions.title': 'ラベル付きセッション',
+    'events.kicker': 'Labeled Events',
+    'events.title': 'ラベル付きイベント',
+    'type.session': 'セッション',
+    'type.event': 'イベント',
+    'empty.sessions': 'ラベル付きセッションはまだありません。',
+    'empty.events': 'ラベル付きイベントはまだありません。',
+    'meta.cwd': 'cwd:',
+    'meta.source': 'source:',
+    'meta.eventId': 'event:',
+    'error.loadFailed': 'データの読み込みに失敗しました。',
+  },
+  en: {
+    'page.eyebrow': 'Labeled Items',
+    'page.heroTitle': 'Labeled Items',
+    'page.heroCopy': 'Sessions and events that have labels attached.',
+    'filter.label': 'Label:',
+    'filter.all': 'All',
+    'sessions.kicker': 'Labeled Sessions',
+    'sessions.title': 'Labeled Sessions',
+    'events.kicker': 'Labeled Events',
+    'events.title': 'Labeled Events',
+    'type.session': 'Session',
+    'type.event': 'Event',
+    'empty.sessions': 'No labeled sessions yet.',
+    'empty.events': 'No labeled events yet.',
+    'meta.cwd': 'cwd:',
+    'meta.source': 'source:',
+    'meta.eventId': 'event:',
+    'error.loadFailed': 'Failed to load data.',
+  },
+  'zh-Hans': {
+    'page.eyebrow': 'Labeled Items',
+    'page.heroTitle': '已标记项目',
+    'page.heroCopy': '已添加标签的会话和事件列表。',
+    'filter.label': '标签:',
+    'filter.all': '全部',
+    'sessions.kicker': 'Labeled Sessions',
+    'sessions.title': '已标记会话',
+    'events.kicker': 'Labeled Events',
+    'events.title': '已标记事件',
+    'type.session': '会话',
+    'type.event': '事件',
+    'empty.sessions': '还没有已标记的会话。',
+    'empty.events': '还没有已标记的事件。',
+    'meta.cwd': 'cwd:',
+    'meta.source': 'source:',
+    'meta.eventId': 'event:',
+    'error.loadFailed': '数据加载失败。',
+  },
+};
+LI_I18N['zh-Hant'] = {
+  ...LI_I18N['zh-Hans'],
+  'page.heroTitle': '已標記項目',
+  'page.heroCopy': '已加上標籤的工作階段和事件列表。',
+  'filter.label': '標籤:',
+  'filter.all': '全部',
+  'sessions.title': '已標記工作階段',
+  'events.title': '已標記事件',
+  'type.session': '工作階段',
+  'type.event': '事件',
+  'empty.sessions': '還沒有已標記的工作階段。',
+  'empty.events': '還沒有已標記的事件。',
+  'error.loadFailed': '資料載入失敗。',
+};
+
+let uiLanguage = 'ja';
+let allLabels = [];
+let currentData = { sessions: [], events: [] };
+
+function esc(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function t(key, vars){
+  const dict = LI_I18N[uiLanguage] || LI_I18N.ja;
+  let text = dict[key];
+  if(typeof text !== 'string'){
+    text = LI_I18N.ja[key] || key;
+  }
+  if(vars){
+    Object.entries(vars).forEach(([name, value]) => {
+      text = text.replaceAll(`{${name}}`, String(value));
+    });
+  }
+  return text;
+}
+
+function normalizeLanguage(raw){
+  if(SUPPORTED_LANGUAGES.includes(raw)) return raw;
+  if(raw && raw.startsWith('zh')){
+    return raw.includes('Hant') || raw.includes('TW') || raw.includes('HK') ? 'zh-Hant' : 'zh-Hans';
+  }
+  return 'ja';
+}
+
+function getRequestedLanguage(){
+  const url = new URL(location.href);
+  const fromUrl = url.searchParams.get('lang');
+  if(fromUrl) return normalizeLanguage(fromUrl);
+  try {
+    const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if(stored) return normalizeLanguage(stored);
+  } catch(e){}
+  return normalizeLanguage(navigator.language || 'ja');
+}
+
+function renderColorStyle(colorValue){
+  if(!colorValue) return '';
+  const c = colorValue;
+  return `background:${c}18;color:${c};border:1px solid ${c}30;`;
+}
+
+function renderLabelBadges(labels){
+  if(!Array.isArray(labels) || labels.length === 0) return '';
+  return labels.map(label =>
+    `<span class="label-badge" style="${renderColorStyle(label.color_value)}"><span class="label-dot" style="background:${esc(label.color_value)}"></span><span>${esc(label.name)}</span></span>`
+  ).join('');
+}
+
+function formatTimestamp(ts){
+  if(!ts) return '';
+  try {
+    const d = new Date(ts);
+    if(isNaN(d.getTime())) return ts;
+    return d.toLocaleString(uiLanguage === 'ja' ? 'ja-JP' : uiLanguage === 'en' ? 'en-US' : uiLanguage.startsWith('zh') ? 'zh-CN' : 'ja-JP');
+  } catch(e) { return ts; }
+}
+
+function renderSessionCard(s){
+  const preview = s.first_real_user_text || s.first_user_text || '';
+  const time = formatTimestamp(s.started_at || s.mtime);
+  return `<div class="item-card" data-type="session" data-path="${esc(s.path)}">
+    <div>
+      <span class="item-type-badge session-type">${esc(t('type.session'))}</span>
+      <span style="font-size:var(--text-caption);color:var(--muted)">${esc(time)}</span>
+    </div>
+    <div class="item-meta">
+      ${s.cwd ? `<span>${esc(t('meta.cwd'))} ${esc(s.cwd)}</span>` : ''}
+      ${s.source ? `<span>${esc(t('meta.source'))} ${esc(s.source)}</span>` : ''}
+    </div>
+    ${preview ? `<div class="item-preview">${esc(preview)}</div>` : ''}
+    <div class="item-labels">${renderLabelBadges(s.labels)}</div>
+  </div>`;
+}
+
+function renderEventCard(e){
+  const preview = e.first_real_user_text || e.first_user_text || '';
+  const time = formatTimestamp(e.started_at || e.mtime);
+  const shortEventId = (e.event_id || '').length > 12 ? e.event_id.substring(0, 12) + '...' : (e.event_id || '');
+  return `<div class="item-card" data-type="event" data-path="${esc(e.session_path)}" data-event-id="${esc(e.event_id)}">
+    <div>
+      <span class="item-type-badge event-type">${esc(t('type.event'))}</span>
+      <span style="font-size:var(--text-caption);color:var(--muted)">${esc(time)}</span>
+    </div>
+    <div class="item-meta">
+      ${e.cwd ? `<span>${esc(t('meta.cwd'))} ${esc(e.cwd)}</span>` : ''}
+      ${e.source ? `<span>${esc(t('meta.source'))} ${esc(e.source)}</span>` : ''}
+      <span>${esc(t('meta.eventId'))} ${esc(shortEventId)}</span>
+    </div>
+    ${preview ? `<div class="item-preview">${esc(preview)}</div>` : ''}
+    <div class="item-labels">${renderLabelBadges(e.labels)}</div>
+  </div>`;
+}
+
+function renderList(){
+  const sessionsEl = document.getElementById('sessions_list');
+  const eventsEl = document.getElementById('events_list');
+  const sessions = currentData.sessions || [];
+  const events = currentData.events || [];
+
+  document.getElementById('sessions_count_badge').textContent = String(sessions.length);
+  document.getElementById('events_count_badge').textContent = String(events.length);
+
+  if(sessions.length === 0){
+    sessionsEl.innerHTML = `<div class="empty-message">${esc(t('empty.sessions'))}</div>`;
+  } else {
+    sessionsEl.innerHTML = sessions.map(renderSessionCard).join('');
+  }
+
+  if(events.length === 0){
+    eventsEl.innerHTML = `<div class="empty-message">${esc(t('empty.events'))}</div>`;
+  } else {
+    eventsEl.innerHTML = events.map(renderEventCard).join('');
+  }
+
+  document.querySelectorAll('.item-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const path = card.dataset.path;
+      const type = card.dataset.type;
+      const eventId = card.dataset.eventId || '';
+      if(window.opener && !window.opener.closed){
+        try {
+          window.opener.postMessage({
+            type: 'open-session',
+            path: path,
+            eventId: type === 'event' ? eventId : '',
+          }, location.origin);
+          window.opener.focus();
+          return;
+        } catch(e){}
+      }
+      const url = new URL('/', location.origin);
+      url.searchParams.set('path', path);
+      if(type === 'event' && eventId){
+        url.searchParams.set('event_id', eventId);
+      }
+      window.open(url.toString(), '_blank');
+    });
+  });
+}
+
+async function loadData(){
+  const filterEl = document.getElementById('label_filter');
+  const labelId = filterEl.value;
+  const params = new URLSearchParams();
+  if(labelId) params.set('label_id', labelId);
+  params.set('ts', Date.now());
+  try {
+    const r = await fetch('/api/labeled-items?' + params.toString(), { cache: 'no-store' });
+    const data = await r.json();
+    currentData = data;
+    renderList();
+  } catch(e){
+    console.error(e);
+    alert(t('error.loadFailed'));
+  }
+}
+
+async function loadLabels(){
+  try {
+    const r = await fetch('/api/labels?ts=' + Date.now(), { cache: 'no-store' });
+    const data = await r.json();
+    allLabels = data.labels || [];
+    populateLabelFilter();
+  } catch(e){
+    console.error(e);
+  }
+}
+
+function populateLabelFilter(){
+  const select = document.getElementById('label_filter');
+  const currentValue = select.value;
+  select.innerHTML = `<option value="">${esc(t('filter.all'))}</option>`;
+  allLabels.forEach(label => {
+    const opt = document.createElement('option');
+    opt.value = label.id;
+    opt.textContent = label.name;
+    select.appendChild(opt);
+  });
+  if(currentValue && allLabels.some(l => String(l.id) === currentValue)){
+    select.value = currentValue;
+  }
+}
+
+function applyLanguage(){
+  document.documentElement.lang = uiLanguage;
+  document.title = t('page.heroTitle');
+  document.getElementById('page_eyebrow').textContent = t('page.eyebrow');
+  document.getElementById('page_title').textContent = t('page.heroTitle');
+  document.getElementById('page_copy').textContent = t('page.heroCopy');
+  document.getElementById('filter_label_text').textContent = t('filter.label');
+  document.getElementById('sessions_kicker').textContent = t('sessions.kicker');
+  document.getElementById('sessions_title').textContent = t('sessions.title');
+  document.getElementById('events_kicker').textContent = t('events.kicker');
+  document.getElementById('events_title').textContent = t('events.title');
+  populateLabelFilter();
+  renderList();
+}
+
+function setUiLanguage(lang, broadcast){
+  uiLanguage = lang;
+  applyLanguage();
+  if(broadcast !== false){
+    try { localStorage.setItem(LANGUAGE_STORAGE_KEY, lang); } catch(e){}
+  }
+  const sel = document.getElementById('language_selector');
+  if(sel) sel.value = lang;
+}
+
+(function buildLanguageSelector(){
+  const sel = document.getElementById('language_selector');
+  const map = { ja: '日本語', en: 'English', 'zh-Hans': '简体中文', 'zh-Hant': '繁體中文' };
+  SUPPORTED_LANGUAGES.forEach(code => {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = map[code] || code;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => setUiLanguage(sel.value, true));
+})();
+
+document.getElementById('label_filter').addEventListener('change', loadData);
+
+window.addEventListener('storage', (event) => {
+  if(event.key !== LANGUAGE_STORAGE_KEY) return;
+  const nextLanguage = normalizeLanguage(event.newValue || 'ja');
+  if(nextLanguage !== uiLanguage){
+    setUiLanguage(nextLanguage, false);
+  }
+});
+
+setUiLanguage(getRequestedLanguage(), false);
+loadLabels().then(() => loadData());
+</script>
+</body>
+</html>
+"""
+
+
 def resolve_session_path(raw_path: str):
     roots = get_canonical_session_roots()
     if not raw_path:
@@ -9184,8 +9973,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(LABELS_PAGE)
             return
 
+        if parsed.path == '/labeled-items':
+            self._send_html(LABELED_ITEMS_PAGE)
+            return
+
         if parsed.path == '/api/labels':
             self._send_json({'labels': list_labels()})
+            return
+
+        if parsed.path == '/api/labeled-items':
+            q = urllib.parse.parse_qs(parsed.query)
+            label_id = parse_optional_int(q.get('label_id', [''])[0])
+            data = fetch_labeled_items(label_id=label_id)
+            self._send_json(data)
             return
 
         if parsed.path == '/api/sessions':
