@@ -32,24 +32,53 @@ CodexCLI(VS Code拡張機能 Codex含む)の履歴 を一覧・詳細表示し�
 
 ```text
 .
-├─ viewer.py
-├─ icons
-│  ├─ codex-sessions-viewer.svg
-│  ├─ claude-sessions-viewer.svg
-│  └─ github-copilot-sessions-viewer.svg
 ├─ image
 │  ├─ 00001.jpg
 │  ├─ 00002.jpg
 │  └─ 00003.jpg
-└─ scripts
-   ├─ windows
-   │  ├─ launch_viewer.bat
-   │  └─ stop_viewer.bat
-   ├─ wsl
-   │  └─ launch_viewer_wsl.sh
-   └─ registry
-      ├─ add_wsl_context_menu.reg
-      └─ remove_wsl_context_menu.reg
+└─ src
+   ├─ .cache
+   │  └─ label-store.json
+   ├─ .vscode
+   │  ├─ launch.json
+   │  └─ tasks.json
+   ├─ Components
+   │  ├─ App.razor
+   │  ├─ Routes.razor
+   │  ├─ _Imports.razor
+   │  ├─ Layout
+   │  │  ├─ MainLayout.razor
+   │  │  ├─ MainLayout.razor.css
+   │  │  ├─ ReconnectModal.razor
+   │  │  ├─ ReconnectModal.razor.css
+   │  │  └─ ReconnectModal.razor.js
+   │  └─ Pages
+   │     ├─ Error.razor
+   │     ├─ Home.razor
+   │     ├─ Labels.razor
+   │     └─ NotFound.razor
+   ├─ Models
+   │  └─ ViewerDtos.cs
+   ├─ Properties
+   │  └─ launchSettings.json
+   ├─ Services
+   │  ├─ LabelStore.cs
+   │  └─ ViewerService.cs
+   ├─ wwwroot
+   │  ├─ app.css
+   │  ├─ css
+   │  │  ├─ labels.css
+   │  │  └─ viewer.css
+   │  ├─ icons
+   │  │  └─ codex-sessions-viewer.svg
+   │  └─ js
+   │     ├─ labels.js
+   │     └─ viewer.js
+   ├─ appsettings.Development.json
+   ├─ appsettings.json
+   ├─ CodexSessionsViewer.csproj
+   ├─ CodexSessionsViewer.sln
+   └─ Program.cs
 ```
 
 ## 起動方法
