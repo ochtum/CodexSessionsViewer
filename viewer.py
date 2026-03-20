@@ -920,16 +920,15 @@ def fetch_labeled_items(label_id=None):
     with _SEARCH_INDEX_LOCK:
         conn = open_search_index_connection()
         try:
-            label_filter = ''
+            session_label_filter = ''
+            event_label_filter = ''
             params_s = []
             params_e = []
             if label_id is not None:
-                label_filter = ' AND sl.label_id = ?'
+                session_label_filter = ' AND sl.label_id = ?'
                 params_s = [label_id]
-                label_filter_e = ' AND el.label_id = ?'
+                event_label_filter = ' AND el.label_id = ?'
                 params_e = [label_id]
-            else:
-                label_filter_e = ''
 
             session_rows = conn.execute(
                 f'''
@@ -938,7 +937,7 @@ def fetch_labeled_items(label_id=None):
                        si.first_user_text, si.first_real_user_text
                 FROM session_label_links sl
                 JOIN session_index si ON si.path = sl.session_path
-                WHERE 1=1{label_filter}
+                WHERE 1=1{session_label_filter}
                 ORDER BY CASE WHEN si.started_at IS NOT NULL AND si.started_at <> '' THEN si.started_at ELSE si.mtime_iso END DESC
                 ''',
                 params_s,
@@ -972,14 +971,13 @@ def fetch_labeled_items(label_id=None):
 
             event_rows = conn.execute(
                 f'''
-                SELECT el.session_path, el.event_id,
+                SELECT DISTINCT el.session_path, el.event_id,
                        si.relative_path, si.mtime_iso, si.session_id,
                        si.started_at, si.cwd, si.model, si.source,
                        si.first_user_text, si.first_real_user_text
                 FROM event_label_links el
                 JOIN session_index si ON si.path = el.session_path
-                WHERE 1=1{label_filter_e}
-                GROUP BY el.session_path, el.event_id
+                WHERE 1=1{event_label_filter}
                 ORDER BY CASE WHEN si.started_at IS NOT NULL AND si.started_at <> '' THEN si.started_at ELSE si.mtime_iso END DESC
                 ''',
                 params_e,
@@ -9723,7 +9721,8 @@ function formatTimestamp(ts){
   try {
     const d = new Date(ts);
     if(isNaN(d.getTime())) return ts;
-    return d.toLocaleString(uiLanguage === 'ja' ? 'ja-JP' : uiLanguage === 'en' ? 'en-US' : uiLanguage.startsWith('zh') ? 'zh-CN' : 'ja-JP');
+    const localeMap = { ja: 'ja-JP', en: 'en-US', 'zh-Hans': 'zh-CN', 'zh-Hant': 'zh-TW' };
+    return d.toLocaleString(localeMap[uiLanguage] || 'ja-JP');
   } catch(e) { return ts; }
 }
 
