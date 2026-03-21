@@ -19,6 +19,8 @@ public class Program
 
     public static void Main(string[] args)
     {
+        TrySetConsoleTitle();
+
         var (contentRootPath, webRootPath) = ResolveAppPaths();
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -66,7 +68,10 @@ public class Program
         {
             pipeline.MinifyCssFiles("css/**/*.css");
         });
+        builder.Services.AddHttpClient();
         builder.Services.AddSingleton<LabelStore>();
+        builder.Services.AddSingleton<ModelCatalogService>();
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<ModelCatalogService>());
         builder.Services.AddSingleton<ViewerService>();
 
         var app = builder.Build();
@@ -99,11 +104,38 @@ public class Program
         app.Run();
     }
 
+    private static void TrySetConsoleTitle()
+    {
+        try
+        {
+            Console.Title = "CodexSessionsViewer";
+        }
+        catch (IOException)
+        {
+        }
+        catch (PlatformNotSupportedException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
     private static void MapApi(WebApplication app)
     {
         app.MapGet("/api/labels", async (ViewerService viewer, CancellationToken cancellationToken) =>
         {
             return Results.Ok(await viewer.GetLabelsAsync(cancellationToken));
+        });
+
+        app.MapGet("/api/model-catalog", (ViewerService viewer) =>
+        {
+            return Results.Ok(viewer.GetModelCatalogStatus());
+        });
+
+        app.MapGet("/api/cost-summary", async (ViewerService viewer, CancellationToken cancellationToken) =>
+        {
+            return Results.Ok(await viewer.GetCostSummaryAsync(cancellationToken));
         });
 
         app.MapGet("/api/sessions", async (HttpRequest request, ViewerService viewer, CancellationToken cancellationToken) =>

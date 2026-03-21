@@ -40,33 +40,17 @@ public sealed partial class ViewerService
         "<collaboration_mode>",
         "<permissions instructions>",
     ];
-    private static readonly IReadOnlyDictionary<string, ModelPricing> ModelPricingTable =
-        new Dictionary<string, ModelPricing>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["gpt-5.4"] = new(2.50m, 0.25m, 15.00m),
-            ["gpt-5.3-codex"] = new(1.75m, 0.175m, 14.00m),
-            ["gpt-5.2-codex"] = new(1.75m, 0.175m, 14.00m),
-            ["gpt-5.2"] = new(1.75m, 0.175m, 14.00m),
-            ["gpt-5.1"] = new(1.25m, 0.125m, 10.00m),
-            ["gpt-5"] = new(1.25m, 0.125m, 10.00m),
-            ["gpt-5-codex"] = new(1.25m, 0.125m, 10.00m),
-            ["gpt-5-mini"] = new(0.25m, 0.025m, 2.00m),
-        };
-    private static readonly IReadOnlyDictionary<string, string> ModelPricingAliases =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["gpt-5.3"] = "gpt-5.3-codex",
-            ["gpt-5-codex"] = "gpt-5",
-        };
 
     private readonly LabelStore _labelStore;
+    private readonly ModelCatalogService _modelCatalog;
     private readonly ConcurrentDictionary<string, SessionCacheEntry> _cache = new(PathComparer);
     private IReadOnlyList<string>? _sessionRoots;
     private IReadOnlyList<string>? _wslDistroRoots;
 
-    public ViewerService(LabelStore labelStore)
+    public ViewerService(LabelStore labelStore, ModelCatalogService modelCatalog)
     {
         _labelStore = labelStore;
+        _modelCatalog = modelCatalog;
     }
 
     public IReadOnlyList<string> GetSessionRoots()
@@ -104,6 +88,135 @@ public sealed partial class ViewerService
     {
         var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
         return new LabelsResponse { Labels = snapshot.Labels };
+    }
+
+    public ModelCatalogStatusDto GetModelCatalogStatus()
+    {
+        return _modelCatalog.GetStatus();
+    }
+
+    public Task<CostSummaryResponse> GetCostSummaryAsync(CancellationToken cancellationToken = default)
+    {
+        var timeZone = TimeZoneInfo.Local;
+        var nowLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime;
+        var groupDefinitions = BuildCostSummaryGroupDefinitions(nowLocal);
+        var groupAccumulators = groupDefinitions
+            .Select(definition => new CostSummaryGroupAccumulator(definition))
+            .ToArray();
+
+        foreach (var path in EnumerateSessionFiles(GetSessionRoots()))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            IndexRecord indexRecord;
+            try
+            {
+                indexRecord = GetOrBuildIndexRecord(path);
+            }
+            catch (FileNotFoundException)
+            {
+                continue;
+            }
+
+            var sessionUsage = new TokenUsageAccumulator();
+            TokenUsageSnapshot? previousTotals = null;
+            var currentModel = string.Empty;
+            var rawLineCount = 0;
+
+            try
+            {
+                foreach (var line in File.ReadLines(path))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    rawLineCount++;
+
+                    if (!TryParseJson(line, out var root))
+                    {
+                        continue;
+                    }
+
+                    using (root)
+                    {
+                        var element = root.RootElement;
+                        var type = GetString(element, "type");
+                        var timestamp = GetString(element, "timestamp");
+                        if (!element.TryGetProperty("payload", out var payload))
+                        {
+                            continue;
+                        }
+
+                        if (type == "turn_context")
+                        {
+                            var turnModel = ExtractModelName(payload);
+                            if (!string.IsNullOrWhiteSpace(turnModel))
+                            {
+                                currentModel = turnModel;
+                            }
+
+                            continue;
+                        }
+
+                        if (type != "event_msg" || GetString(payload, "type") != "token_count")
+                        {
+                            continue;
+                        }
+
+                        var usageEvent = BuildTokenUsageEvent(
+                            payload,
+                            timestamp,
+                            rawLineCount,
+                            ref currentModel,
+                            ref previousTotals);
+                        if (usageEvent is null)
+                        {
+                            continue;
+                        }
+
+                        sessionUsage.Add(usageEvent);
+                        if (TryGetLocalTimestamp(usageEvent.Timestamp, timeZone, out var eventLocal))
+                        {
+                            foreach (var group in groupAccumulators)
+                            {
+                                group.AddTokenUsageEvent(eventLocal, usageEvent);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (IOException)
+            {
+                // Keep partial aggregates for readable portions of the file.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Skip unreadable files.
+            }
+
+            if (!sessionUsage.HasUsage)
+            {
+                continue;
+            }
+
+            if (!TryGetSessionAggregateTimestamp(indexRecord.Summary, timeZone, out var sessionLocal))
+            {
+                continue;
+            }
+
+            var sessionSummary = sessionUsage.ToDto();
+            foreach (var group in groupAccumulators)
+            {
+                group.AddSessionUsage(sessionLocal, sessionSummary);
+            }
+        }
+
+        return Task.FromResult(new CostSummaryResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            TimeZoneId = timeZone.Id,
+            Groups = groupAccumulators
+                .Select(group => group.ToDto())
+                .ToArray(),
+        });
     }
 
     public async Task<SessionListResponse> GetSessionsAsync(
@@ -328,6 +441,87 @@ public sealed partial class ViewerService
         return session with { SessionLabelIds = labelIds, SessionLabels = labels };
     }
 
+    private static IReadOnlyList<CostSummaryGroupDefinition> BuildCostSummaryGroupDefinitions(DateTime nowLocal)
+    {
+        var today = nowLocal.Date;
+        var thisMonthStart = new DateTime(today.Year, today.Month, 1);
+        var thisWeekStart = StartOfWeek(today, DayOfWeek.Monday);
+
+        return
+        [
+            new CostSummaryGroupDefinition(
+                "month",
+                [
+                    new CostSummaryPeriodDefinition("two_months_ago", thisMonthStart.AddMonths(-2), thisMonthStart.AddMonths(-1)),
+                    new CostSummaryPeriodDefinition("last_month", thisMonthStart.AddMonths(-1), thisMonthStart),
+                    new CostSummaryPeriodDefinition("this_month", thisMonthStart, thisMonthStart.AddMonths(1)),
+                ]),
+            new CostSummaryGroupDefinition(
+                "week",
+                [
+                    new CostSummaryPeriodDefinition("two_weeks_ago", thisWeekStart.AddDays(-14), thisWeekStart.AddDays(-7)),
+                    new CostSummaryPeriodDefinition("last_week", thisWeekStart.AddDays(-7), thisWeekStart),
+                    new CostSummaryPeriodDefinition("this_week", thisWeekStart, thisWeekStart.AddDays(7)),
+                ]),
+            new CostSummaryGroupDefinition(
+                "day",
+                [
+                    new CostSummaryPeriodDefinition("two_days_ago", today.AddDays(-2), today.AddDays(-1)),
+                    new CostSummaryPeriodDefinition("yesterday", today.AddDays(-1), today),
+                    new CostSummaryPeriodDefinition("today", today, today.AddDays(1)),
+                ]),
+        ];
+    }
+
+    private static DateTime StartOfWeek(DateTime date, DayOfWeek weekStartsOn)
+    {
+        var normalized = date.Date;
+        var diff = (7 + (normalized.DayOfWeek - weekStartsOn)) % 7;
+        return normalized.AddDays(-diff);
+    }
+
+    private static bool TryGetSessionAggregateTimestamp(SessionSummaryDto summary, TimeZoneInfo timeZone, out DateTime localTimestamp)
+    {
+        var candidate = !string.IsNullOrWhiteSpace(summary.StartedAt)
+            ? summary.StartedAt
+            : !string.IsNullOrWhiteSpace(summary.MaxEventTs)
+                ? summary.MaxEventTs
+                : summary.Mtime;
+        return TryGetLocalTimestamp(candidate, timeZone, out localTimestamp);
+    }
+
+    private static bool TryGetLocalTimestamp(string? rawTimestamp, TimeZoneInfo timeZone, out DateTime localTimestamp)
+    {
+        if (TryParseTimestamp(rawTimestamp, out var parsed))
+        {
+            localTimestamp = TimeZoneInfo.ConvertTime(parsed, timeZone).DateTime;
+            return true;
+        }
+
+        localTimestamp = default;
+        return false;
+    }
+
+    private static bool TryParseTimestamp(string? rawTimestamp, out DateTimeOffset parsed)
+    {
+        if (string.IsNullOrWhiteSpace(rawTimestamp))
+        {
+            parsed = default;
+            return false;
+        }
+
+        return DateTimeOffset.TryParse(
+                rawTimestamp,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeLocal,
+                out parsed)
+            || DateTimeOffset.TryParse(
+                rawTimestamp,
+                CultureInfo.CurrentCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeLocal,
+                out parsed);
+    }
+
     private static SessionSummaryDto WithSessionLabelIds(SessionSummaryDto session, IReadOnlyList<int> labelIds)
     {
         return session with { SessionLabelIds = labelIds };
@@ -382,6 +576,7 @@ public sealed partial class ViewerService
             Signature = signature,
             IndexRecord = built,
             EventsData = cached is not null && cached.Signature == signature ? cached.EventsData : null,
+            PricingVersion = cached?.PricingVersion ?? 0,
         };
         _cache[path] = next;
         TrimCacheIfNeeded();
@@ -398,8 +593,10 @@ public sealed partial class ViewerService
         }
 
         var signature = GetSignature(fileInfo);
+        var pricingVersion = _modelCatalog.GetPricingVersion();
         if (_cache.TryGetValue(path, out var cached)
             && cached.Signature == signature
+            && cached.PricingVersion == pricingVersion
             && cached.EventsData is not null)
         {
             cached.LastAccessedTicks = Environment.TickCount64;
@@ -412,6 +609,7 @@ public sealed partial class ViewerService
             Signature = signature,
             IndexRecord = cached is not null && cached.Signature == signature ? cached.IndexRecord : null,
             EventsData = built,
+            PricingVersion = pricingVersion,
         };
         _cache[path] = next;
         TrimCacheIfNeeded();
@@ -657,7 +855,7 @@ public sealed partial class ViewerService
             usageAccumulator.HasUsage ? usageAccumulator.ToDto() : null);
     }
 
-    private static SessionEventDto? BuildTokenUsageEvent(
+    private SessionEventDto? BuildTokenUsageEvent(
         JsonElement payload,
         string timestamp,
         int rawLineCount,
@@ -697,7 +895,11 @@ public sealed partial class ViewerService
             return null;
         }
 
-        var costUsd = TryCalculateCostUsd(currentModel, normalized);
+        var costUsd = _modelCatalog.TryCalculateCostUsd(
+            currentModel,
+            normalized.InputTokens,
+            normalized.CachedInputTokens,
+            normalized.OutputTokens);
         return new SessionEventDto
         {
             EventId = $"line-{rawLineCount}",
@@ -813,95 +1015,6 @@ public sealed partial class ViewerService
             outputTokens,
             reasoningOutputTokens,
             Math.Max(totalTokens, 0));
-    }
-
-    private static decimal? TryCalculateCostUsd(string model, TokenUsageSnapshot usage)
-    {
-        if (!TryResolveModelPricing(model, out var pricing))
-        {
-            return null;
-        }
-
-        var nonCachedInputTokens = Math.Max(usage.InputTokens - usage.CachedInputTokens, 0);
-        return ((decimal)nonCachedInputTokens / 1_000_000m) * pricing.InputCostPerMToken
-            + ((decimal)usage.CachedInputTokens / 1_000_000m) * pricing.CachedInputCostPerMToken
-            + ((decimal)usage.OutputTokens / 1_000_000m) * pricing.OutputCostPerMToken;
-    }
-
-    private static bool TryResolveModelPricing(string rawModel, out ModelPricing pricing)
-    {
-        var trimmed = rawModel.Trim();
-        if (IsOpenRouterFreeModel(trimmed))
-        {
-            pricing = new ModelPricing(0m, 0m, 0m);
-            return true;
-        }
-
-        var normalized = NormalizePricingModel(rawModel);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            pricing = default;
-            return false;
-        }
-
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var current = normalized;
-        while (!string.IsNullOrWhiteSpace(current) && visited.Add(current))
-        {
-            if (TryGetExactOrVersionedModelPricing(current, out pricing))
-            {
-                return true;
-            }
-
-            if (!ModelPricingAliases.TryGetValue(current, out current!))
-            {
-                break;
-            }
-        }
-
-        pricing = default;
-        return false;
-    }
-
-    private static bool TryGetExactOrVersionedModelPricing(string model, out ModelPricing pricing)
-    {
-        if (ModelPricingTable.TryGetValue(model, out pricing))
-        {
-            return true;
-        }
-
-        foreach (var pair in ModelPricingTable.OrderByDescending(item => item.Key.Length))
-        {
-            if (model.StartsWith(pair.Key + "-", StringComparison.OrdinalIgnoreCase))
-            {
-                pricing = pair.Value;
-                return true;
-            }
-        }
-
-        pricing = default;
-        return false;
-    }
-
-    private static string NormalizePricingModel(string rawModel)
-    {
-        var model = rawModel.Trim();
-        foreach (var prefix in new[] { "openai/", "azure/", "openrouter/openai/" })
-        {
-            if (model.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return model[prefix.Length..];
-            }
-        }
-
-        return model;
-    }
-
-    private static bool IsOpenRouterFreeModel(string model)
-    {
-        return string.Equals(model, "openrouter/free", StringComparison.OrdinalIgnoreCase)
-            || (model.StartsWith("openrouter/", StringComparison.OrdinalIgnoreCase)
-                && model.EndsWith(":free", StringComparison.OrdinalIgnoreCase));
     }
 
     private static long GetInt64(JsonElement element, string propertyName)
@@ -1631,6 +1744,8 @@ public sealed partial class ViewerService
 
         public EventsData? EventsData { get; init; }
 
+        public long PricingVersion { get; init; }
+
         private long _lastAccessedTicks = Environment.TickCount64;
 
         public long LastAccessedTicks
@@ -1649,11 +1764,6 @@ public sealed partial class ViewerService
 
     private readonly record struct SessionSignature(long LastWriteTicks, long Size);
 
-    private readonly record struct ModelPricing(
-        decimal InputCostPerMToken,
-        decimal CachedInputCostPerMToken,
-        decimal OutputCostPerMToken);
-
     private readonly record struct TokenUsageSnapshot(
         long InputTokens,
         long CachedInputTokens,
@@ -1667,6 +1777,140 @@ public sealed partial class ViewerService
             && OutputTokens == 0
             && ReasoningOutputTokens == 0
             && TotalTokens == 0;
+    }
+
+    private sealed record CostSummaryPeriodDefinition(
+        string Key,
+        DateTime StartLocal,
+        DateTime EndLocal);
+
+    private sealed record CostSummaryGroupDefinition(
+        string Key,
+        IReadOnlyList<CostSummaryPeriodDefinition> Periods);
+
+    private sealed class CostSummaryGroupAccumulator
+    {
+        private readonly CostSummaryGroupDefinition _definition;
+        private readonly CostSummaryBucketAccumulator[] _sessions;
+        private readonly CostSummaryBucketAccumulator[] _tokenUsageEvents;
+
+        public CostSummaryGroupAccumulator(CostSummaryGroupDefinition definition)
+        {
+            _definition = definition;
+            _sessions = definition.Periods.Select(_ => new CostSummaryBucketAccumulator()).ToArray();
+            _tokenUsageEvents = definition.Periods.Select(_ => new CostSummaryBucketAccumulator()).ToArray();
+        }
+
+        public void AddSessionUsage(DateTime localTimestamp, TokenUsageSummaryDto usage)
+        {
+            if (TryGetPeriodIndex(localTimestamp, out var index))
+            {
+                _sessions[index].Add(usage);
+            }
+        }
+
+        public void AddTokenUsageEvent(DateTime localTimestamp, SessionEventDto usageEvent)
+        {
+            if (TryGetPeriodIndex(localTimestamp, out var index))
+            {
+                _tokenUsageEvents[index].Add(usageEvent);
+            }
+        }
+
+        public CostSummaryGroupDto ToDto()
+        {
+            return new CostSummaryGroupDto
+            {
+                Key = _definition.Key,
+                Sessions = _definition.Periods
+                    .Select((period, index) => _sessions[index].ToDto(period.Key))
+                    .ToArray(),
+                TokenUsageEvents = _definition.Periods
+                    .Select((period, index) => _tokenUsageEvents[index].ToDto(period.Key))
+                    .ToArray(),
+            };
+        }
+
+        private bool TryGetPeriodIndex(DateTime localTimestamp, out int index)
+        {
+            for (var i = 0; i < _definition.Periods.Count; i++)
+            {
+                var period = _definition.Periods[i];
+                if (localTimestamp >= period.StartLocal && localTimestamp < period.EndLocal)
+                {
+                    index = i;
+                    return true;
+                }
+            }
+
+            index = -1;
+            return false;
+        }
+    }
+
+    private sealed class CostSummaryBucketAccumulator
+    {
+        private int _itemCount;
+        private long _inputTokens;
+        private long _cachedInputTokens;
+        private long _outputTokens;
+        private long _reasoningOutputTokens;
+        private long _totalTokens;
+        private decimal _costUsd;
+        private bool _hasUnknownPricing;
+
+        public void Add(TokenUsageSummaryDto usage)
+        {
+            _itemCount++;
+            _inputTokens += usage.InputTokens;
+            _cachedInputTokens += usage.CachedInputTokens;
+            _outputTokens += usage.OutputTokens;
+            _reasoningOutputTokens += usage.ReasoningOutputTokens;
+            _totalTokens += usage.TotalTokens;
+
+            if (usage.CostUsd.HasValue)
+            {
+                _costUsd += usage.CostUsd.Value;
+            }
+            else
+            {
+                _hasUnknownPricing = true;
+            }
+        }
+
+        public void Add(SessionEventDto usageEvent)
+        {
+            _itemCount++;
+            _inputTokens += usageEvent.InputTokens;
+            _cachedInputTokens += usageEvent.CachedInputTokens;
+            _outputTokens += usageEvent.OutputTokens;
+            _reasoningOutputTokens += usageEvent.ReasoningOutputTokens;
+            _totalTokens += usageEvent.TotalTokens;
+
+            if (usageEvent.CostUsd.HasValue)
+            {
+                _costUsd += usageEvent.CostUsd.Value;
+            }
+            else
+            {
+                _hasUnknownPricing = true;
+            }
+        }
+
+        public CostSummaryPeriodDto ToDto(string key)
+        {
+            return new CostSummaryPeriodDto
+            {
+                Key = key,
+                ItemCount = _itemCount,
+                InputTokens = _inputTokens,
+                CachedInputTokens = _cachedInputTokens,
+                OutputTokens = _outputTokens,
+                ReasoningOutputTokens = _reasoningOutputTokens,
+                TotalTokens = _totalTokens,
+                CostUsd = _hasUnknownPricing ? null : _costUsd,
+            };
+        }
     }
 
     private sealed class TokenUsageAccumulator

@@ -102,6 +102,64 @@ public sealed class TokenUsageSummaryDto
     public decimal? CostUsd { get; init; }
 }
 
+public sealed class ModelCatalogStatusDto
+{
+    public string PricingCatalogPath { get; init; } = string.Empty;
+
+    public string PricingCatalogUpdatedAt { get; init; } = string.Empty;
+
+    public int PricingModelCount { get; init; }
+
+    public int AliasCount { get; init; }
+
+    public bool OpenAiApiConfigured { get; init; }
+
+    public string OpenAiModelsEndpoint { get; init; } = string.Empty;
+
+    public string OpenAiModelsLastRefreshedAt { get; init; } = string.Empty;
+
+    public int OpenAiModelCount { get; init; }
+
+    public string OpenAiModelsLastError { get; init; } = string.Empty;
+}
+
+public sealed class CostSummaryPeriodDto
+{
+    public string Key { get; init; } = string.Empty;
+
+    public int ItemCount { get; init; }
+
+    public long InputTokens { get; init; }
+
+    public long CachedInputTokens { get; init; }
+
+    public long OutputTokens { get; init; }
+
+    public long ReasoningOutputTokens { get; init; }
+
+    public long TotalTokens { get; init; }
+
+    public decimal? CostUsd { get; init; }
+}
+
+public sealed class CostSummaryGroupDto
+{
+    public string Key { get; init; } = string.Empty;
+
+    public IReadOnlyList<CostSummaryPeriodDto> Sessions { get; init; } = [];
+
+    public IReadOnlyList<CostSummaryPeriodDto> TokenUsageEvents { get; init; } = [];
+}
+
+public sealed class CostSummaryResponse
+{
+    public string GeneratedAt { get; init; } = string.Empty;
+
+    public string TimeZoneId { get; init; } = string.Empty;
+
+    public IReadOnlyList<CostSummaryGroupDto> Groups { get; init; } = [];
+}
+
 public sealed class LabelsResponse
 {
     public IReadOnlyList<LabelDto> Labels { get; init; } = [];
