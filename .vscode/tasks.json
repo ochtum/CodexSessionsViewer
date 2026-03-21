@@ -7,7 +7,7 @@
       "type": "process",
       "args": [
         "build",
-        "${workspaceFolder}/CodexSessionsViewer.csproj",
+        "${workspaceFolder}/src/CodexSessionsViewer.csproj",
         "-c",
         "Debug"
       ],
@@ -19,7 +19,7 @@
       "type": "process",
       "args": [
         "build",
-        "${workspaceFolder}/CodexSessionsViewer.csproj",
+        "${workspaceFolder}/src/CodexSessionsViewer.csproj",
         "-c",
         "Release"
       ],
