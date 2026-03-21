@@ -5,6 +5,7 @@ const state = {
   activePath: null,
   activeSession: null,
   activeEvents: [],
+  activeUsage: null,
   activeRawLineCount: 0,
   sessionRoot: '',
   labels: [],
@@ -693,10 +694,22 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'meta.usage': 'usage',
+    'meta.models': 'models',
     'summary.sessions': 'sessions: {current} / {filtered} / {total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'usage.model': 'model',
+    'usage.input': 'input',
+    'usage.cached': 'cache',
+    'usage.output': 'output',
+    'usage.reasoning': 'reasoning',
+    'usage.total': 'total',
+    'usage.cost': 'cost',
+    'usage.perDollar': '1ドルあたり',
+    'usage.costUnknown': 'コスト不明',
+    'usage.tokensUnit': 'トークン',
     'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(previewなし)',
     'status.sessions.loadingTitle': 'セッション一覧を読み込み中...',
@@ -854,10 +867,22 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'meta.usage': 'usage',
+    'meta.models': 'models',
     'summary.sessions': 'sessions: {current} / {filtered} / {total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'usage.model': 'model',
+    'usage.input': 'input',
+    'usage.cached': 'cache',
+    'usage.output': 'output',
+    'usage.reasoning': 'reasoning',
+    'usage.total': 'total',
+    'usage.cost': 'cost',
+    'usage.perDollar': 'per $1',
+    'usage.costUnknown': 'cost unavailable',
+    'usage.tokensUnit': 'tokens',
     'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(no preview)',
     'status.sessions.loadingTitle': 'Loading sessions...',
@@ -1015,10 +1040,22 @@ const I18N = {
     'meta.cwd': 'cwd',
     'meta.time': 'time',
     'meta.status': 'status',
+    'meta.usage': '用量',
+    'meta.models': '模型',
     'summary.sessions': 'sessions: {current} / {filtered} / {total}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
+    'usage.model': '模型',
+    'usage.input': '输入',
+    'usage.cached': '缓存',
+    'usage.output': '输出',
+    'usage.reasoning': '推理',
+    'usage.total': '总计',
+    'usage.cost': '成本',
+    'usage.perDollar': '每 $1',
+    'usage.costUnknown': '成本未知',
+    'usage.tokensUnit': 'tokens',
     'detail.matchCounter': '{current} / {total}',
     'session.preview.empty': '(无预览)',
     'status.sessions.loadingTitle': '正在加载会话列表...',
@@ -1162,6 +1199,18 @@ I18N['zh-Hant'] = {
   'shortcut.after': '僅顯示錨點之後',
   'shortcut.escape': '關閉快捷鍵列表或標籤選擇框，並離開搜尋輸入框。',
   'session.preview.empty': '(無預覽)',
+  'meta.usage': '用量',
+  'meta.models': '模型',
+  'usage.model': '模型',
+  'usage.input': '輸入',
+  'usage.cached': '快取',
+  'usage.output': '輸出',
+  'usage.reasoning': '推理',
+  'usage.total': '總計',
+  'usage.cost': '成本',
+  'usage.perDollar': '每 $1',
+  'usage.costUnknown': '成本未知',
+  'usage.tokensUnit': 'tokens',
   'status.sessions.loadingTitle': '正在載入工作階段列表...',
   'status.sessions.loadingCopy': '正在檢查最新工作階段。',
   'status.sessions.errorTitle': '載入列表失敗',
@@ -1801,7 +1850,8 @@ function setDetailEventBodyExpanded(path, eventKey, expanded){
 
 function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta){
   const role = ev.role || 'system';
-  const roleLabel = role.replace('_', ' ');
+  const roleLabel = role.replaceAll('_', ' ');
+  const kindLabel = (ev.kind || 'event').replaceAll('_', ' ');
   const labels = ev.labels || [];
   const systemLabels = ev.system_labels || [];
   const matchesSelectedLabel = selectedEventLabelId && labels.some(label => String(label.id) === selectedEventLabelId);
@@ -1826,7 +1876,7 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
     ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">${esc(t('copy.single'))}</button>`
     : '';
   const systemLabelsHtml = systemLabels.map(label => `<span class="badge-kind badge-system-label">${esc(label)}</span>`).join('');
-  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(ev.kind || 'event')}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
+  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(kindLabel)}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
 }
 
 function attachVisibleEventCardHandlers(eventsBox, startIndex, endIndex){
@@ -1999,6 +2049,54 @@ function fmt(ts){
   if(!ts) return '';
   const d = new Date(ts);
   return isNaN(d) ? ts : d.toLocaleString();
+}
+
+function getUiLocale(){
+  if(uiLanguage === 'zh-Hans') return 'zh-CN';
+  if(uiLanguage === 'zh-Hant') return 'zh-TW';
+  return uiLanguage || 'ja';
+}
+
+function formatNumber(value){
+  const n = Number(value);
+  if(!Number.isFinite(n)) return '-';
+  return n.toLocaleString(getUiLocale());
+}
+
+function formatUsd(value){
+  const n = Number(value);
+  if(!Number.isFinite(n)) return t('usage.costUnknown');
+  const digits = n >= 10 ? 2 : (n >= 1 ? 3 : 4);
+  return new Intl.NumberFormat(getUiLocale(), {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(n);
+}
+
+function formatUsageCostDisplay(value){
+  return typeof value === 'number' && Number.isFinite(value)
+    ? formatUsd(value)
+    : t('usage.costUnknown');
+}
+
+function formatCompactNumber(value){
+  const n = Number(value);
+  if(!Number.isFinite(n)) return '-';
+  return new Intl.NumberFormat(getUiLocale(), {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+function formatTokensPerDollar(totalTokens, costUsd){
+  const total = Number(totalTokens);
+  const cost = Number(costUsd);
+  if(!Number.isFinite(total) || !Number.isFinite(cost) || cost <= 0){
+    return '';
+  }
+  return `${formatCompactNumber(total / cost)} ${t('usage.tokensUnit')}`;
 }
 
 function toTimestamp(ts){
@@ -2674,6 +2772,9 @@ function getEventBodyText(ev){
   if(ev.kind === 'message' || ev.kind === 'agent_update'){
     return stringifyEventBodyValue(ev.text);
   }
+  if(ev.kind === 'token_usage'){
+    return formatTokenUsageEventBody(ev);
+  }
   if(ev.kind === 'function_call'){
     return `name: ${stringifyEventBodyValue(ev.name)}
 ${stringifyEventBodyValue(ev.arguments)}`;
@@ -2686,6 +2787,21 @@ ${stringifyEventBodyValue(ev.arguments)}`;
   } catch (error) {
     return '';
   }
+}
+
+function formatTokenUsageEventBody(ev){
+  const lines = [];
+  if(ev.model){
+    lines.push(`${t('usage.model')}: ${stringifyEventBodyValue(ev.model)}`);
+  }
+  lines.push(`${t('usage.input')}: ${formatNumber(ev.input_tokens || 0)}`);
+  lines.push(`${t('usage.cached')}: ${formatNumber(ev.cached_input_tokens || 0)}`);
+  lines.push(`${t('usage.output')}: ${formatNumber(ev.output_tokens || 0)}`);
+  lines.push(`${t('usage.reasoning')}: ${formatNumber(ev.reasoning_output_tokens || 0)}`);
+  lines.push(`${t('usage.total')}: ${formatNumber(ev.total_tokens || 0)}`);
+  lines.push(`${t('usage.cost')}: ${formatUsageCostDisplay(ev.cost_usd)}`);
+  lines.push(`${t('usage.perDollar')}: ${formatTokensPerDollar(ev.total_tokens || 0, ev.cost_usd) || '-'}`);
+  return lines.join('\n');
 }
 
 function getCopyableEventText(ev){
@@ -3019,6 +3135,25 @@ function updateCopyResumeButtonState(){
   button.disabled = !getActiveSessionId();
 }
 
+function renderUsageMetaRows(usage){
+  if(!usage) return '';
+  const metrics = [
+    [t('usage.input'), formatNumber(usage.input_tokens || 0)],
+    [t('usage.cached'), formatNumber(usage.cached_input_tokens || 0)],
+    [t('usage.output'), formatNumber(usage.output_tokens || 0)],
+    [t('usage.reasoning'), formatNumber(usage.reasoning_output_tokens || 0)],
+    [t('usage.total'), formatNumber(usage.total_tokens || 0)],
+    [t('usage.cost'), formatUsageCostDisplay(usage.cost_usd)],
+    [t('usage.perDollar'), formatTokensPerDollar(usage.total_tokens || 0, usage.cost_usd) || '-'],
+  ];
+  const models = Array.isArray(usage.models) ? usage.models.filter(Boolean) : [];
+  const usageRow = `<div class="header-meta-row"><span class="header-meta-label">${esc(t('meta.usage'))}</span><div class="usage-meta-items">${metrics.map(([label, value]) => `<span class="usage-metric"><span class="meta-tag">${esc(`${label}:`)}</span><span class="header-meta-text usage-metric-value">${esc(value)}</span></span>`).join('')}</div></div>`;
+  const modelsRow = models.length
+    ? `<div class="header-meta-row"><span class="header-meta-label">${esc(t('meta.models'))}</span><span class="header-meta-value">${esc(models.join(', '))}</span></div>`
+    : '';
+  return usageRow + modelsRow;
+}
+
 function updateEventSelectionModeButtonState(){
   const button = document.getElementById('event_selection_mode');
   if(!button){
@@ -3257,6 +3392,7 @@ async function loadSessions(options){
         state.activePath = null;
         state.activeSession = null;
         state.activeEvents = [];
+        state.activeUsage = null;
         state.activeRawLineCount = 0;
         state.detailError = '';
         state.detailLoadMode = '';
@@ -3916,6 +4052,7 @@ function renderActiveSession(){
   const rawSummary = t('summary.raw', {
     count: state.isDetailLoading && state.activeEvents.length === 0 ? '...' : state.activeRawLineCount,
   });
+  const usageMetaRows = renderUsageMetaRows(state.activeUsage);
   const errorNote = state.detailError
     ? `<span class="header-meta-text error">${esc(t('meta.status'))}: ${esc(state.detailError)}</span>`
     : '';
@@ -3936,7 +4073,8 @@ function renderActiveSession(){
       <span class="header-meta-text">${esc(eventsSummary)}</span>
       <span class="header-meta-text">${esc(rawSummary)}</span>
       ${errorNote}
-    </div>`;
+    </div>
+    ${usageMetaRows}`;
   updateDetailMetaVisibility();
 
   if(state.isDetailLoading && state.activeEvents.length === 0){
@@ -4009,6 +4147,7 @@ async function openSession(path, options){
   }
   if(previousPath !== path){
     state.activeEvents = [];
+    state.activeUsage = null;
     state.activeRawLineCount = 0;
     clearSelectedEventIds();
     clearMessageRangeSelection();
@@ -4026,6 +4165,7 @@ async function openSession(path, options){
       return;
     }
     state.activeSession = metaData.session || nextSession;
+    state.activeUsage = metaData.usage || state.activeUsage;
     state.detailError = '';
     renderActiveSession();
 
@@ -4040,6 +4180,7 @@ async function openSession(path, options){
     }
     state.activeSession = eventsData.session || state.activeSession;
     state.activeEvents = eventsData.events || [];
+    state.activeUsage = eventsData.usage || null;
     state.activeRawLineCount = eventsData.raw_line_count || 0;
     state.detailError = '';
     syncSelectedEventIdsToActiveEvents();

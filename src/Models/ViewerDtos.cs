@@ -66,9 +66,40 @@ public sealed class SessionEventDto
 
     public string Output { get; init; } = string.Empty;
 
+    public string Model { get; init; } = string.Empty;
+
+    public long InputTokens { get; init; }
+
+    public long CachedInputTokens { get; init; }
+
+    public long OutputTokens { get; init; }
+
+    public long ReasoningOutputTokens { get; init; }
+
+    public long TotalTokens { get; init; }
+
+    public decimal? CostUsd { get; init; }
+
     public IReadOnlyList<string> SystemLabels { get; init; } = [];
 
     public IReadOnlyList<LabelDto> Labels { get; init; } = [];
+}
+
+public sealed class TokenUsageSummaryDto
+{
+    public IReadOnlyList<string> Models { get; init; } = [];
+
+    public long InputTokens { get; init; }
+
+    public long CachedInputTokens { get; init; }
+
+    public long OutputTokens { get; init; }
+
+    public long ReasoningOutputTokens { get; init; }
+
+    public long TotalTokens { get; init; }
+
+    public decimal? CostUsd { get; init; }
 }
 
 public sealed class LabelsResponse
@@ -95,6 +126,8 @@ public sealed class SessionDetailResponse
     public IReadOnlyList<SessionEventDto> Events { get; init; } = [];
 
     public int RawLineCount { get; init; }
+
+    public TokenUsageSummaryDto? Usage { get; init; }
 }
 
 public sealed class OkResponse

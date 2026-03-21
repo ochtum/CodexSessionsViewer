@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -39,6 +40,24 @@ public sealed partial class ViewerService
         "<collaboration_mode>",
         "<permissions instructions>",
     ];
+    private static readonly IReadOnlyDictionary<string, ModelPricing> ModelPricingTable =
+        new Dictionary<string, ModelPricing>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["gpt-5.4"] = new(2.50m, 0.25m, 15.00m),
+            ["gpt-5.3-codex"] = new(1.75m, 0.175m, 14.00m),
+            ["gpt-5.2-codex"] = new(1.75m, 0.175m, 14.00m),
+            ["gpt-5.2"] = new(1.75m, 0.175m, 14.00m),
+            ["gpt-5.1"] = new(1.25m, 0.125m, 10.00m),
+            ["gpt-5"] = new(1.25m, 0.125m, 10.00m),
+            ["gpt-5-codex"] = new(1.25m, 0.125m, 10.00m),
+            ["gpt-5-mini"] = new(0.25m, 0.025m, 2.00m),
+        };
+    private static readonly IReadOnlyDictionary<string, string> ModelPricingAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["gpt-5.3"] = "gpt-5.3-codex",
+            ["gpt-5-codex"] = "gpt-5",
+        };
 
     private readonly LabelStore _labelStore;
     private readonly ConcurrentDictionary<string, SessionCacheEntry> _cache = new(PathComparer);
@@ -204,6 +223,7 @@ public sealed partial class ViewerService
                         snapshot.LabelById)))
                 .ToArray(),
             RawLineCount = eventsData.RawLineCount,
+            Usage = eventsData.Usage,
         };
     }
 
@@ -326,6 +346,13 @@ public sealed partial class ViewerService
             Arguments = @event.Arguments,
             CallId = @event.CallId,
             Output = @event.Output,
+            Model = @event.Model,
+            InputTokens = @event.InputTokens,
+            CachedInputTokens = @event.CachedInputTokens,
+            OutputTokens = @event.OutputTokens,
+            ReasoningOutputTokens = @event.ReasoningOutputTokens,
+            TotalTokens = @event.TotalTokens,
+            CostUsd = @event.CostUsd,
             SystemLabels = @event.SystemLabels,
             Labels = labels,
         };
@@ -511,6 +538,9 @@ public sealed partial class ViewerService
     {
         var events = new List<SessionEventDto>();
         var rawLineCount = 0;
+        var usageAccumulator = new TokenUsageAccumulator();
+        TokenUsageSnapshot? previousTotals = null;
+        var currentModel = string.Empty;
         foreach (var line in File.ReadLines(path))
         {
             rawLineCount++;
@@ -529,14 +559,22 @@ public sealed partial class ViewerService
                     continue;
                 }
 
-                if (type == "response_item")
+                if (type == "turn_context")
+                {
+                    var turnModel = ExtractModelName(payload);
+                    if (!string.IsNullOrWhiteSpace(turnModel))
+                    {
+                        currentModel = turnModel;
+                    }
+                }
+                else if (type == "response_item")
                 {
                     var responseType = GetString(payload, "type");
                     if (responseType == "message")
                     {
                         var role = GetString(payload, "role");
                         var text = ExtractTextFromContent(payload);
-                        if (!string.IsNullOrWhiteSpace(text))
+                        if (!string.IsNullOrWhiteSpace(text) && events.Count < MaxEvents)
                         {
                             var systemLabels = Array.Empty<string>();
                             if (role == "user")
@@ -556,7 +594,7 @@ public sealed partial class ViewerService
                             });
                         }
                     }
-                    else if (responseType == "function_call")
+                    else if (responseType == "function_call" && events.Count < MaxEvents)
                     {
                         events.Add(new SessionEventDto
                         {
@@ -567,7 +605,7 @@ public sealed partial class ViewerService
                             Arguments = GetValueText(payload, "arguments"),
                         });
                     }
-                    else if (responseType == "function_call_output")
+                    else if (responseType == "function_call_output" && events.Count < MaxEvents)
                     {
                         events.Add(new SessionEventDto
                         {
@@ -579,25 +617,312 @@ public sealed partial class ViewerService
                         });
                     }
                 }
-                else if (type == "event_msg" && GetString(payload, "type") == "agent_message")
+                else if (type == "event_msg")
                 {
-                    events.Add(new SessionEventDto
+                    var eventType = GetString(payload, "type");
+                    if (eventType == "agent_message" && events.Count < MaxEvents)
                     {
-                        EventId = $"line-{rawLineCount}",
-                        Timestamp = timestamp,
-                        Kind = "agent_update",
-                        Text = GetValueText(payload, "message"),
-                    });
+                        events.Add(new SessionEventDto
+                        {
+                            EventId = $"line-{rawLineCount}",
+                            Timestamp = timestamp,
+                            Kind = "agent_update",
+                            Text = GetValueText(payload, "message"),
+                        });
+                    }
+                    else if (eventType == "token_count")
+                    {
+                        var usageEvent = BuildTokenUsageEvent(
+                            payload,
+                            timestamp,
+                            rawLineCount,
+                            ref currentModel,
+                            ref previousTotals);
+                        if (usageEvent is not null)
+                        {
+                            usageAccumulator.Add(usageEvent);
+                            if (events.Count < MaxEvents)
+                            {
+                                events.Add(usageEvent);
+                            }
+                        }
+                    }
                 }
             }
+        }
 
-            if (events.Count >= MaxEvents)
+        return new EventsData(
+            events,
+            rawLineCount,
+            usageAccumulator.HasUsage ? usageAccumulator.ToDto() : null);
+    }
+
+    private static SessionEventDto? BuildTokenUsageEvent(
+        JsonElement payload,
+        string timestamp,
+        int rawLineCount,
+        ref string currentModel,
+        ref TokenUsageSnapshot? previousTotals)
+    {
+        var extractedModel = ExtractModelName(payload);
+        if (!string.IsNullOrWhiteSpace(extractedModel))
+        {
+            currentModel = extractedModel;
+        }
+
+        if (!payload.TryGetProperty("info", out var info) || info.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var totalUsage = TryGetTokenUsageSnapshot(info, "total_token_usage");
+        var lastUsage = TryGetTokenUsageSnapshot(info, "last_token_usage");
+        var delta = totalUsage is not null
+            ? SubtractTokenUsage(totalUsage.Value, previousTotals)
+            : lastUsage;
+
+        if (totalUsage is not null)
+        {
+            previousTotals = totalUsage;
+        }
+
+        if (delta is null)
+        {
+            return null;
+        }
+
+        var normalized = NormalizeTokenUsage(delta.Value);
+        if (normalized.IsEmpty)
+        {
+            return null;
+        }
+
+        var costUsd = TryCalculateCostUsd(currentModel, normalized);
+        return new SessionEventDto
+        {
+            EventId = $"line-{rawLineCount}",
+            Timestamp = timestamp,
+            Kind = "token_usage",
+            Role = "system",
+            Model = currentModel,
+            InputTokens = normalized.InputTokens,
+            CachedInputTokens = normalized.CachedInputTokens,
+            OutputTokens = normalized.OutputTokens,
+            ReasoningOutputTokens = normalized.ReasoningOutputTokens,
+            TotalTokens = normalized.TotalTokens,
+            CostUsd = costUsd,
+        };
+    }
+
+    private static string ExtractModelName(JsonElement payload)
+    {
+        foreach (var candidate in new[]
+        {
+            GetString(payload, "model"),
+            GetString(payload, "model_name"),
+            TryGetNestedString(payload, "info", "model"),
+            TryGetNestedString(payload, "info", "model_name"),
+            TryGetNestedString(payload, "info", "metadata", "model"),
+            TryGetNestedString(payload, "metadata", "model"),
+        })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string TryGetNestedString(JsonElement element, params string[] path)
+    {
+        var current = element;
+        foreach (var segment in path)
+        {
+            if (current.ValueKind != JsonValueKind.Object)
+            {
+                return string.Empty;
+            }
+
+            if (!current.TryGetProperty(segment, out current))
+            {
+                return string.Empty;
+            }
+        }
+
+        if (current.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return string.Empty;
+        }
+
+        return current.ValueKind == JsonValueKind.String
+            ? current.GetString() ?? string.Empty
+            : current.ToString();
+    }
+
+    private static TokenUsageSnapshot? TryGetTokenUsageSnapshot(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var usage) || usage.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var inputTokens = GetInt64(usage, "input_tokens");
+        var cachedInputTokens = GetInt64(usage, "cached_input_tokens");
+        if (cachedInputTokens == 0)
+        {
+            cachedInputTokens = GetInt64(usage, "cache_read_input_tokens");
+        }
+
+        var outputTokens = GetInt64(usage, "output_tokens");
+        var reasoningOutputTokens = GetInt64(usage, "reasoning_output_tokens");
+        var totalTokens = GetInt64(usage, "total_tokens");
+
+        return new TokenUsageSnapshot(
+            inputTokens,
+            cachedInputTokens,
+            outputTokens,
+            reasoningOutputTokens,
+            totalTokens);
+    }
+
+    private static TokenUsageSnapshot SubtractTokenUsage(TokenUsageSnapshot current, TokenUsageSnapshot? previous)
+    {
+        return new TokenUsageSnapshot(
+            Math.Max(current.InputTokens - previous.GetValueOrDefault().InputTokens, 0),
+            Math.Max(current.CachedInputTokens - previous.GetValueOrDefault().CachedInputTokens, 0),
+            Math.Max(current.OutputTokens - previous.GetValueOrDefault().OutputTokens, 0),
+            Math.Max(current.ReasoningOutputTokens - previous.GetValueOrDefault().ReasoningOutputTokens, 0),
+            Math.Max(current.TotalTokens - previous.GetValueOrDefault().TotalTokens, 0));
+    }
+
+    private static TokenUsageSnapshot NormalizeTokenUsage(TokenUsageSnapshot usage)
+    {
+        var inputTokens = Math.Max(usage.InputTokens, 0);
+        var cachedInputTokens = Math.Clamp(usage.CachedInputTokens, 0, inputTokens);
+        var outputTokens = Math.Max(usage.OutputTokens, 0);
+        var reasoningOutputTokens = Math.Max(usage.ReasoningOutputTokens, 0);
+        var totalTokens = usage.TotalTokens > 0
+            ? usage.TotalTokens
+            : inputTokens + outputTokens;
+
+        return new TokenUsageSnapshot(
+            inputTokens,
+            cachedInputTokens,
+            outputTokens,
+            reasoningOutputTokens,
+            Math.Max(totalTokens, 0));
+    }
+
+    private static decimal? TryCalculateCostUsd(string model, TokenUsageSnapshot usage)
+    {
+        if (!TryResolveModelPricing(model, out var pricing))
+        {
+            return null;
+        }
+
+        var nonCachedInputTokens = Math.Max(usage.InputTokens - usage.CachedInputTokens, 0);
+        return ((decimal)nonCachedInputTokens / 1_000_000m) * pricing.InputCostPerMToken
+            + ((decimal)usage.CachedInputTokens / 1_000_000m) * pricing.CachedInputCostPerMToken
+            + ((decimal)usage.OutputTokens / 1_000_000m) * pricing.OutputCostPerMToken;
+    }
+
+    private static bool TryResolveModelPricing(string rawModel, out ModelPricing pricing)
+    {
+        var trimmed = rawModel.Trim();
+        if (IsOpenRouterFreeModel(trimmed))
+        {
+            pricing = new ModelPricing(0m, 0m, 0m);
+            return true;
+        }
+
+        var normalized = NormalizePricingModel(rawModel);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            pricing = default;
+            return false;
+        }
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var current = normalized;
+        while (!string.IsNullOrWhiteSpace(current) && visited.Add(current))
+        {
+            if (TryGetExactOrVersionedModelPricing(current, out pricing))
+            {
+                return true;
+            }
+
+            if (!ModelPricingAliases.TryGetValue(current, out current!))
             {
                 break;
             }
         }
 
-        return new EventsData(events, rawLineCount);
+        pricing = default;
+        return false;
+    }
+
+    private static bool TryGetExactOrVersionedModelPricing(string model, out ModelPricing pricing)
+    {
+        if (ModelPricingTable.TryGetValue(model, out pricing))
+        {
+            return true;
+        }
+
+        foreach (var pair in ModelPricingTable.OrderByDescending(item => item.Key.Length))
+        {
+            if (model.StartsWith(pair.Key + "-", StringComparison.OrdinalIgnoreCase))
+            {
+                pricing = pair.Value;
+                return true;
+            }
+        }
+
+        pricing = default;
+        return false;
+    }
+
+    private static string NormalizePricingModel(string rawModel)
+    {
+        var model = rawModel.Trim();
+        foreach (var prefix in new[] { "openai/", "azure/", "openrouter/openai/" })
+        {
+            if (model.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return model[prefix.Length..];
+            }
+        }
+
+        return model;
+    }
+
+    private static bool IsOpenRouterFreeModel(string model)
+    {
+        return string.Equals(model, "openrouter/free", StringComparison.OrdinalIgnoreCase)
+            || (model.StartsWith("openrouter/", StringComparison.OrdinalIgnoreCase)
+                && model.EndsWith(":free", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static long GetInt64(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return 0;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number)
+        {
+            return property.TryGetInt64(out var value) ? value : 0;
+        }
+
+        if (property.ValueKind == JsonValueKind.String
+            && long.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        return 0;
     }
 
     private static SessionSummaryDto UpdateSummaryFromResponseItem(SessionSummaryDto summary, JsonElement payload)
@@ -1317,7 +1642,86 @@ public sealed partial class ViewerService
 
     private sealed record IndexRecord(SessionSummaryDto Summary, string SearchText);
 
-    private sealed record EventsData(IReadOnlyList<SessionEventDto> Events, int RawLineCount);
+    private sealed record EventsData(
+        IReadOnlyList<SessionEventDto> Events,
+        int RawLineCount,
+        TokenUsageSummaryDto? Usage);
 
     private readonly record struct SessionSignature(long LastWriteTicks, long Size);
+
+    private readonly record struct ModelPricing(
+        decimal InputCostPerMToken,
+        decimal CachedInputCostPerMToken,
+        decimal OutputCostPerMToken);
+
+    private readonly record struct TokenUsageSnapshot(
+        long InputTokens,
+        long CachedInputTokens,
+        long OutputTokens,
+        long ReasoningOutputTokens,
+        long TotalTokens)
+    {
+        public bool IsEmpty =>
+            InputTokens == 0
+            && CachedInputTokens == 0
+            && OutputTokens == 0
+            && ReasoningOutputTokens == 0
+            && TotalTokens == 0;
+    }
+
+    private sealed class TokenUsageAccumulator
+    {
+        private readonly HashSet<string> _models = new(StringComparer.OrdinalIgnoreCase);
+        private long _inputTokens;
+        private long _cachedInputTokens;
+        private long _outputTokens;
+        private long _reasoningOutputTokens;
+        private long _totalTokens;
+        private decimal _costUsd;
+        private bool _hasUnknownPricing;
+
+        public bool HasUsage =>
+            _inputTokens > 0
+            || _cachedInputTokens > 0
+            || _outputTokens > 0
+            || _reasoningOutputTokens > 0
+            || _totalTokens > 0;
+
+        public void Add(SessionEventDto @event)
+        {
+            _inputTokens += @event.InputTokens;
+            _cachedInputTokens += @event.CachedInputTokens;
+            _outputTokens += @event.OutputTokens;
+            _reasoningOutputTokens += @event.ReasoningOutputTokens;
+            _totalTokens += @event.TotalTokens;
+
+            if (!string.IsNullOrWhiteSpace(@event.Model))
+            {
+                _models.Add(@event.Model);
+            }
+
+            if (@event.CostUsd.HasValue)
+            {
+                _costUsd += @event.CostUsd.Value;
+            }
+            else
+            {
+                _hasUnknownPricing = true;
+            }
+        }
+
+        public TokenUsageSummaryDto ToDto()
+        {
+            return new TokenUsageSummaryDto
+            {
+                Models = _models.OrderBy(model => model, StringComparer.OrdinalIgnoreCase).ToArray(),
+                InputTokens = _inputTokens,
+                CachedInputTokens = _cachedInputTokens,
+                OutputTokens = _outputTokens,
+                ReasoningOutputTokens = _reasoningOutputTokens,
+                TotalTokens = _totalTokens,
+                CostUsd = _hasUnknownPricing ? null : _costUsd,
+            };
+        }
+    }
 }
