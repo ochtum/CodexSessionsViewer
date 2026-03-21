@@ -33,6 +33,21 @@ if (Test-Path $payloadDir) {
 if (Test-Path $runCmdPath) {
     Remove-Item -Path $runCmdPath -Force
 }
+@(
+    (Join-Path $outputDir $launcherName),
+    (Join-Path $outputDir "$appName.pdb"),
+    (Join-Path $outputDir "$appName.staticwebassets.endpoints.json"),
+    (Join-Path $outputDir "appsettings.json"),
+    (Join-Path $outputDir "appsettings.Development.json"),
+    (Join-Path $outputDir "model-pricing.json"),
+    (Join-Path $outputDir "web.config"),
+    (Join-Path $outputDir "wwwroot"),
+    (Join-Path $outputDir "obj")
+) | ForEach-Object {
+    if (Test-Path $_) {
+        Remove-Item -Path $_ -Recurse -Force
+    }
+}
 New-Item -ItemType Directory -Path $payloadDir -Force | Out-Null
 
 $publishArgs = @(

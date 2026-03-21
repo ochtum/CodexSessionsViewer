@@ -30,9 +30,11 @@ If you want to follow updates, watching the repository also helps.
 
 ## How to Launch
 
-Download the `app-framework-dependent` folder from Releases, extract it, and run `CodexSessionsViewer.exe`.
+Download the `app-framework-dependent` folder from Releases, extract it, and run `run.cmd`. The executable and related assemblies are bundled under the `payload` folder.
 
 Note: Running this tool requires the .NET 10 SDK or .NET 10 Runtime. If you are not sure whether either is installed, or if you prefer not to install them, download the `app-self-contained` folder instead.
+
+Prefer `run.cmd` over launching `payload\CodexSessionsViewer.exe` directly. `run.cmd` keeps the working directory consistent and also keeps the console window title aligned with `CodexSessionsViewer`.
 
 ---
 

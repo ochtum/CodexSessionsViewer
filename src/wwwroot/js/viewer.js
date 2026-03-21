@@ -7,6 +7,10 @@ const state = {
   activeEvents: [],
   activeUsage: null,
   activeRawLineCount: 0,
+  todayUsageSummary: null,
+  isTodayUsageLoading: false,
+  hasTodayUsageLoaded: false,
+  todayUsageError: '',
   sessionRoot: '',
   labels: [],
   isSessionsLoading: false,
@@ -583,6 +587,10 @@ const I18N = {
     'header.list.showShort': '一覧を表示',
     'header.labels': 'ラベル管理',
     'header.costs': 'コスト表示',
+    'todayUsage.title': '今日',
+    'todayUsage.loading': '今日の usage を読み込み中...',
+    'todayUsage.empty': '今日の usage はまだありません',
+    'todayUsage.error': '今日の usage を取得できませんでした',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '検索と絞り込み',
     'toolbar.copy': 'フィルターは次回起動時にも保持されます。',
@@ -769,6 +777,10 @@ const I18N = {
     'header.list.showShort': 'Show list',
     'header.labels': 'Labels',
     'header.costs': 'Costs',
+    'todayUsage.title': 'Today',
+    'todayUsage.loading': 'Loading today\'s usage...',
+    'todayUsage.empty': 'No usage yet today',
+    'todayUsage.error': 'Failed to load today\'s usage',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': 'Search and filter',
     'toolbar.copy': 'Filters are preserved the next time you launch the viewer.',
@@ -955,6 +967,10 @@ const I18N = {
     'header.list.showShort': '显示列表',
     'header.labels': '标签管理',
     'header.costs': '成本汇总',
+    'todayUsage.title': '今天',
+    'todayUsage.loading': '正在加载今天的 usage...',
+    'todayUsage.empty': '今天还没有 usage',
+    'todayUsage.error': '无法获取今天的 usage',
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '搜索与筛选',
     'toolbar.copy': '筛选条件会在下次启动时继续保留。',
@@ -1142,6 +1158,10 @@ I18N['zh-Hant'] = {
   'header.list.showShort': '顯示列表',
   'header.labels': '標籤管理',
   'header.costs': '成本彙總',
+  'todayUsage.title': '今天',
+  'todayUsage.loading': '正在載入今天的 usage...',
+  'todayUsage.empty': '今天還沒有 usage',
+  'todayUsage.error': '無法取得今天的 usage',
   'toolbar.heading': '搜尋與篩選',
   'toolbar.copy': '篩選條件會在下次啟動時繼續保留。',
   'toolbar.filters.hide': '隱藏篩選',
@@ -1389,6 +1409,7 @@ function applyMainLanguage(){
   document.getElementById('open_shortcuts').setAttribute('title', t('header.shortcuts'));
   setTextById('open_label_manager', t('header.labels'));
   setTextById('open_cost_summary', t('header.costs'));
+  renderTodayUsageSummary();
   setText('.toolbar .section-kicker', t('toolbar.kicker'));
   setText('.toolbar .toolbar-heading', t('toolbar.heading'));
   setText('.toolbar .toolbar-copy', t('toolbar.copy'));
@@ -1542,6 +1563,7 @@ const DETAIL_INTERACTION_LOCK_MS = 4000;
 let loadSessionsTimer = null;
 let loadSessionsRequestSeq = 0;
 let loadSessionDetailRequestSeq = 0;
+let todayUsageSummaryRequestSeq = 0;
 let saveFiltersFrame = 0;
 let deferredDetailSyncTimer = 0;
 let labelManagerWindow = null;
@@ -2217,6 +2239,92 @@ function formatUsageScoreDisplay(value){
     return '-';
   }
   return score.toFixed(2);
+}
+
+function extractTodayUsageSummary(costSummary){
+  if(!costSummary || !Array.isArray(costSummary.groups)){
+    return null;
+  }
+  const dayGroup = costSummary.groups.find(group => group && group.key === 'day');
+  if(!dayGroup || !Array.isArray(dayGroup.sessions)){
+    return null;
+  }
+  return dayGroup.sessions.find(period => period && period.key === 'today') || null;
+}
+
+function renderTodayUsageSummary(){
+  const container = document.getElementById('today_usage_summary');
+  if(!container){
+    return;
+  }
+
+  if(state.isTodayUsageLoading && !state.todayUsageSummary){
+    container.innerHTML = `<div class="today-usage-card"><span class="today-usage-title">${esc(t('todayUsage.title'))}</span><span class="today-usage-placeholder">${esc(t('todayUsage.loading'))}</span></div>`;
+    return;
+  }
+
+  const summary = state.todayUsageSummary;
+  if(!summary){
+    const toneClass = state.todayUsageError ? ' error' : '';
+    const text = state.todayUsageError
+      ? t('todayUsage.error')
+      : (state.hasTodayUsageLoaded ? t('todayUsage.empty') : t('todayUsage.loading'));
+    container.innerHTML = `<div class="today-usage-card"><span class="today-usage-title">${esc(t('todayUsage.title'))}</span><span class="today-usage-placeholder${toneClass}">${esc(text)}</span></div>`;
+    return;
+  }
+
+  const performance = getUsageCostPerformance(summary.total_tokens || 0, summary.cost_usd);
+  const metrics = [
+    {
+      label: t('usage.total'),
+      value: formatNumber(summary.total_tokens || 0),
+      tooltip: t('usage.tooltip.total'),
+    },
+    {
+      label: t('usage.cost'),
+      value: formatUsageCostDisplay(summary.cost_usd),
+      tooltip: t('usage.tooltip.cost'),
+    },
+    {
+      label: t('usage.score'),
+      value: formatUsageScoreDisplay(performance.score),
+      tooltip: t('usage.tooltip.score'),
+    },
+    {
+      label: t('usage.rank'),
+      value: performance.rank || '-',
+      tooltip: t('usage.tooltip.rank'),
+    },
+  ];
+  container.innerHTML = `<div class="today-usage-card"><span class="today-usage-title">${esc(t('todayUsage.title'))}</span><div class="today-usage-items">${metrics.map(({ label, value, tooltip }) => `<span class="usage-metric" data-tooltip="${esc(tooltip)}" tabindex="0" aria-label="${esc(`${label}: ${tooltip}`)}"><span class="meta-tag">${esc(`${label}:`)}</span><span class="header-meta-text usage-metric-value">${esc(value)}</span></span>`).join('')}</div></div>`;
+}
+
+async function loadTodayUsageSummary(){
+  const requestId = ++todayUsageSummaryRequestSeq;
+  state.isTodayUsageLoading = true;
+  renderTodayUsageSummary();
+  try {
+    const response = await fetch('/api/cost-summary?ts=' + Date.now(), { cache: 'no-store' });
+    const data = await response.json();
+    if(requestId !== todayUsageSummaryRequestSeq){
+      return;
+    }
+    state.todayUsageSummary = extractTodayUsageSummary(data);
+    state.hasTodayUsageLoaded = true;
+    state.todayUsageError = '';
+  } catch (error) {
+    if(requestId !== todayUsageSummaryRequestSeq){
+      return;
+    }
+    state.hasTodayUsageLoaded = true;
+    state.todayUsageError = normalizeRequestError(error, t('todayUsage.error'));
+  } finally {
+    if(requestId !== todayUsageSummaryRequestSeq){
+      return;
+    }
+    state.isTodayUsageLoading = false;
+    renderTodayUsageSummary();
+  }
 }
 
 function toTimestamp(ts){
@@ -4377,6 +4485,7 @@ async function openSession(path, options){
 async function refreshActiveSession(){
   if(!state.activePath) return;
   await openSession(state.activePath, { mode: 'refresh' });
+  await loadTodayUsageSummary();
 }
 
 function isEditableTarget(target){
@@ -4514,14 +4623,14 @@ function triggerCheckboxShortcut(id){
 
 function triggerViewerRefresh(){
   if(state.activePath){
-    refreshActiveSession();
+    void refreshActiveSession();
     return;
   }
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
   }
-  loadSessions({ mode: 'reload' });
+  void loadSessions({ mode: 'reload' }).then(() => loadTodayUsageSummary());
 }
 
 function moveDetailKeywordSearchByShortcut(step){
@@ -4685,11 +4794,7 @@ function initViewerPage(){
     setDetailMetaVisible(!detailMetaVisible);
   });
   safeBindById('reload', 'click', () => {
-    if(loadSessionsTimer){
-      clearTimeout(loadSessionsTimer);
-      loadSessionsTimer = null;
-    }
-    loadSessions({ mode: 'reload' });
+    triggerViewerRefresh();
   });
   safeBindById('clear', 'click', clearFilters);
   document.getElementById('only_user_instruction').addEventListener('change', () => {
@@ -5012,6 +5117,7 @@ function initViewerPage(){
   updateMessageRangeFilterButtonsState();
   updateDetailKeywordControls({ total: 0 });
   updateRefreshDetailButtonState();
+  renderTodayUsageSummary();
   updateFilterVisibility();
   restoreFilters();
   initSegmentedInputs();
@@ -5025,7 +5131,10 @@ function initViewerPage(){
   renderSessionList();
   loadLabels(false)
     .catch(() => {})
-    .finally(() => loadSessions({ mode: 'initial' }));
+    .finally(() => {
+      void loadTodayUsageSummary();
+      void loadSessions({ mode: 'initial' });
+    });
 }
 
 if(document.readyState === 'loading'){

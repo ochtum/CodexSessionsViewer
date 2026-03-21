@@ -30,9 +30,11 @@ CodexCLI(VS Code拡張機能 Codex含む)の履歴 を一覧・詳細表示し�
 
 ## 起動方法
 
-Releasesにある`app-framework-dependent`フォルダをダウンロード後、解凍してから中にある`CodexSessionsViewer.exe`を実行してください。
+Releasesにある`app-framework-dependent`フォルダをダウンロード後、解凍してから中にある`run.cmd`を実行してください。実行ファイルや DLL などの本体は `payload` フォルダにまとまっています。
 
 ※本ツールの実行には.NET 10 SDK または.NET 10 Runtimeが必要となります。入っているか分からない、またはインストールしないことを望む場合、`app-self-contained`フォルダをダウンロードしてください。
+
+※`payload\CodexSessionsViewer.exe` を直接実行するより、`run.cmd` の利用を推奨します。`run.cmd` は起動ディレクトリを整えたうえで、プロンプトウィンドウのタイトルも `CodexSessionsViewer` に揃えます。
 
 ---
 
