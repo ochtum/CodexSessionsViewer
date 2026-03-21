@@ -160,53 +160,67 @@ Releasesにある`app-framework-dependent`フォルダをダウンロード後�
 
 ---
 
-## ディレクトリ構成
+## ファイル構成
 
 ```text
 .
-── .vscode
-   │  ├─ launch.json
-   │  └─ tasks.json
-── src
-   ├─ .cache
-   │  └─ label-store.json
-   ├─ Components
-   │  ├─ App.razor
-   │  ├─ Routes.razor
-   │  ├─ _Imports.razor
-   │  ├─ Layout
-   │  │  ├─ MainLayout.razor
-   │  │  ├─ MainLayout.razor.css
-   │  │  ├─ ReconnectModal.razor
-   │  │  ├─ ReconnectModal.razor.css
-   │  │  └─ ReconnectModal.razor.js
-   │  └─ Pages
-   │     ├─ Error.razor
-   │     ├─ Home.razor
-   │     ├─ Labels.razor
-   │     └─ NotFound.razor
-   ├─ Models
-   │  └─ ViewerDtos.cs
-   ├─ Properties
-   │  └─ launchSettings.json
-   ├─ Services
-   │  ├─ LabelStore.cs
-   │  └─ ViewerService.cs
-   ├─ wwwroot
-   │  ├─ app.css
-   │  ├─ css
-   │  │  ├─ labels.css
-   │  │  └─ viewer.css
-   │  ├─ icons
-   │  │  └─ codex-sessions-viewer.svg
-   │  └─ js
-   │     ├─ labels.js
-   │     └─ viewer.js
-   ├─ appsettings.Development.json
-   ├─ appsettings.json
-   ├─ CodexSessionsViewer.csproj
-   ├─ CodexSessionsViewer.sln
-   └─ Program.cs
+├── .gitignore                         # ルートの除外設定
+├── LICENSE                            # ライセンス
+├── README.md                          # 日本語README
+├── README_en.md                       # 英語README
+├── publish.ps1                        # 配布用 publish スクリプト
+├── .vscode/
+│   ├── launch.json                    # VS Code のデバッグ起動設定
+│   └── tasks.json                     # VS Code のビルドタスク設定
+├── image/
+│   ├── 00001.jpg                      # README掲載用のメイン画面サンプル
+│   ├── 00002.jpg                      # README掲載用のラベル管理画面サンプル
+│   └── 00003.jpg                      # README掲載用のショートカット画面サンプル
+├── image-token-estimator/
+│   ├── index.html                     # 画像入力 token 見積もりツール本体
+│   ├── app.js                         # 見積もりロジック
+│   └── styles.css                     # 見積もりツール用スタイル
+└── src/
+    ├── .cache/
+    │   └── label-store.json           # ラベル定義と紐付けの保存先
+    ├── CodexSessionsViewer.sln        # ソリューション
+    ├── CodexSessionsViewer.csproj     # ASP.NET Core / Blazor プロジェクト定義
+    ├── Program.cs                     # アプリ起動、URL設定、APIエンドポイント定義
+    ├── appsettings.json               # 本番向け設定
+    ├── appsettings.Development.json   # 開発向け設定
+    ├── Components/
+    │   ├── App.razor                  # HTMLルートと共通スクリプト読込
+    │   ├── Routes.razor               # ルーティング定義
+    │   ├── _Imports.razor             # Razor 共通 using
+    │   ├── Layout/
+    │   │   ├── MainLayout.razor       # 共通レイアウト
+    │   │   ├── MainLayout.razor.css   # 共通レイアウト用スタイル
+    │   │   ├── ReconnectModal.razor   # 再接続モーダル UI
+    │   │   ├── ReconnectModal.razor.css # 再接続モーダル用スタイル
+    │   │   └── ReconnectModal.razor.js  # 再接続モーダル用スクリプト
+    │   └── Pages/
+    │       ├── Error.razor            # エラー画面
+    │       ├── Home.razor             # メイン画面
+    │       ├── Labels.razor           # ラベル管理画面
+    │       └── NotFound.razor         # 404画面
+    ├── Models/
+    │   └── ViewerDtos.cs              # APIレスポンス/リクエスト用 DTO
+    ├── Properties/
+    │   ├── AssemblyInfo.cs            # バージョン情報
+    │   └── launchSettings.json        # ローカル開発用起動設定
+    ├── Services/
+    │   ├── LabelStore.cs              # ラベル保存・検証ロジック
+    │   └── ViewerService.cs           # セッション探索・読込・検索ロジック
+    └── wwwroot/
+        ├── app.css                    # 全体共通スタイル
+        ├── css/
+        │   ├── labels.css             # ラベル管理画面用スタイル
+        │   └── viewer.css             # メイン画面用スタイル
+        ├── icons/
+        │   └── codex-sessions-viewer.svg # アプリアイコン
+        └── js/
+            ├── labels.js              # ラベル管理画面用スクリプト
+            └── viewer.js              # メイン画面用スクリプト
 ```
 
 ## ❗このプロジェクトは MIT ライセンスの下で提供されています。詳細は LICENSE ファイルをご覧ください。

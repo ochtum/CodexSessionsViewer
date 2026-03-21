@@ -1443,8 +1443,8 @@ let saveFiltersFrame = 0;
 let deferredDetailSyncTimer = 0;
 let labelManagerWindow = null;
 let labelPickerHandler = null;
-let filtersVisible = true;
-let detailActionsVisible = true;
+let filtersVisible = false;
+let detailActionsVisible = false;
 let detailMetaVisible = false;
 let leftPaneVisible = true;
 let pendingAutomaticDetailSync = false;
@@ -3307,6 +3307,7 @@ function saveFilters(){
     filters_visible: filtersVisible,
     detail_actions_visible: detailActionsVisible,
     left_pane_visible: leftPaneVisible,
+    panel_defaults_v: 2,
   };
   try {
     localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
@@ -3347,8 +3348,10 @@ function restoreFilters(){
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
     if(typeof data.detail_event_label_filter === 'string') document.getElementById('detail_event_label_filter').dataset.pendingValue = data.detail_event_label_filter;
     refreshDateTimeInputPairStates();
-    if(typeof data.filters_visible === 'boolean') filtersVisible = data.filters_visible;
-    if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
+    if(data.panel_defaults_v >= 2){
+      if(typeof data.filters_visible === 'boolean') filtersVisible = data.filters_visible;
+      if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
+    }
     if(typeof data.left_pane_visible === 'boolean') leftPaneVisible = data.left_pane_visible;
   } catch (e) {
     // Ignore invalid saved filters.
