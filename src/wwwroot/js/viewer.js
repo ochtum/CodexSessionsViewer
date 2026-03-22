@@ -2,6 +2,8 @@
 const state = {
   sessions: [],
   filtered: [],
+  labeledSessions: [],
+  labeledEvents: [],
   activePath: null,
   activeSession: null,
   activeEvents: [],
@@ -17,6 +19,10 @@ const state = {
   hasLoadedSessions: false,
   sessionsError: '',
   sessionsLoadMode: '',
+  isLabeledLoading: false,
+  hasLoadedLabeled: false,
+  labeledError: '',
+  leftPaneTab: 'sessions',
   isDetailLoading: false,
   detailError: '',
   detailLoadMode: '',
@@ -594,6 +600,20 @@ const I18N = {
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '検索と絞り込み',
     'toolbar.copy': 'フィルターは次回起動時にも保持されます。',
+    'leftPane.tab.sessions': 'セッションリスト',
+    'leftPane.tab.labels': 'ラベルリスト',
+    'labelsPane.kicker': 'Label Browser',
+    'labelsPane.heading': 'ラベルリスト',
+    'labelsPane.copy': 'ラベルを付けたセッションとイベントをここからまとめて開けます。',
+    'labelsPane.group.sessions': 'ラベル付きセッション',
+    'labelsPane.group.events': 'ラベル付きイベント',
+    'labelsPane.item.session': 'session',
+    'labelsPane.item.event': 'event',
+    'labelsPane.kind.message': 'message',
+    'labelsPane.kind.function_call': 'function call',
+    'labelsPane.kind.function_output': 'function output',
+    'labelsPane.kind.agent_update': 'agent update',
+    'labelsPane.kind.token_usage': 'token usage',
     'toolbar.reload': 'Reload',
     'toolbar.clear': 'Clear',
     'toolbar.filters.hide': 'フィルタを隠す',
@@ -707,6 +727,7 @@ const I18N = {
     'meta.usage': 'usage',
     'meta.models': 'models',
     'summary.sessions': 'sessions: {current} / {filtered} / {total}',
+    'summary.labels': 'labels: sessions {sessions} / events {events}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
@@ -742,6 +763,11 @@ const I18N = {
     'status.sessions.emptyCopy': '読み込み対象ディレクトリに .jsonl セッションがあるか確認してください。',
     'status.sessions.refreshTitle': '一覧を更新中...',
     'status.sessions.refreshCopy': '最新のセッションを再取得しています。',
+    'status.labels.loadingTitle': 'ラベルリストを読み込み中...',
+    'status.labels.loadingCopy': 'ラベル付きのセッションとイベントを整理しています。',
+    'status.labels.errorTitle': 'ラベルリストの取得に失敗しました',
+    'status.labels.emptyTitle': 'ラベル付きの項目はまだありません',
+    'status.labels.emptyCopy': 'セッションやイベントにラベルを付けると、ここに一覧表示されます。',
     'status.detail.loadingTitle': 'セッション詳細を読み込み中...',
     'status.detail.loadingCopy': 'イベントを取得しています。',
     'status.detail.errorTitle': '詳細の取得に失敗しました',
@@ -784,6 +810,20 @@ const I18N = {
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': 'Search and filter',
     'toolbar.copy': 'Filters are preserved the next time you launch the viewer.',
+    'leftPane.tab.sessions': 'Session list',
+    'leftPane.tab.labels': 'Label list',
+    'labelsPane.kicker': 'Label Browser',
+    'labelsPane.heading': 'Label list',
+    'labelsPane.copy': 'Open labeled sessions and events from here in one place.',
+    'labelsPane.group.sessions': 'Labeled sessions',
+    'labelsPane.group.events': 'Labeled events',
+    'labelsPane.item.session': 'session',
+    'labelsPane.item.event': 'event',
+    'labelsPane.kind.message': 'message',
+    'labelsPane.kind.function_call': 'function call',
+    'labelsPane.kind.function_output': 'function output',
+    'labelsPane.kind.agent_update': 'agent update',
+    'labelsPane.kind.token_usage': 'token usage',
     'toolbar.reload': 'Reload',
     'toolbar.clear': 'Clear',
     'toolbar.filters.hide': 'Hide filters',
@@ -897,6 +937,7 @@ const I18N = {
     'meta.usage': 'usage',
     'meta.models': 'models',
     'summary.sessions': 'sessions: {current} / {filtered} / {total}',
+    'summary.labels': 'labels: sessions {sessions} / events {events}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
@@ -932,6 +973,11 @@ const I18N = {
     'status.sessions.emptyCopy': 'Check whether the target directory contains .jsonl sessions.',
     'status.sessions.refreshTitle': 'Refreshing list...',
     'status.sessions.refreshCopy': 'Fetching the latest sessions again.',
+    'status.labels.loadingTitle': 'Loading labeled items...',
+    'status.labels.loadingCopy': 'Collecting labeled sessions and events.',
+    'status.labels.errorTitle': 'Failed to load the label list',
+    'status.labels.emptyTitle': 'No labeled items yet',
+    'status.labels.emptyCopy': 'Labeled sessions and events will appear here.',
     'status.detail.loadingTitle': 'Loading session detail...',
     'status.detail.loadingCopy': 'Fetching events.',
     'status.detail.errorTitle': 'Failed to load detail',
@@ -974,6 +1020,20 @@ const I18N = {
     'toolbar.kicker': 'Session Browser',
     'toolbar.heading': '搜索与筛选',
     'toolbar.copy': '筛选条件会在下次启动时继续保留。',
+    'leftPane.tab.sessions': '会话列表',
+    'leftPane.tab.labels': '标签列表',
+    'labelsPane.kicker': 'Label Browser',
+    'labelsPane.heading': '标签列表',
+    'labelsPane.copy': '这里集中列出带标签的会话和事件，可直接打开。',
+    'labelsPane.group.sessions': '带标签的会话',
+    'labelsPane.group.events': '带标签的事件',
+    'labelsPane.item.session': 'session',
+    'labelsPane.item.event': 'event',
+    'labelsPane.kind.message': 'message',
+    'labelsPane.kind.function_call': 'function call',
+    'labelsPane.kind.function_output': 'function output',
+    'labelsPane.kind.agent_update': 'agent update',
+    'labelsPane.kind.token_usage': 'token usage',
     'toolbar.reload': 'Reload',
     'toolbar.clear': 'Clear',
     'toolbar.filters.hide': '隐藏筛选',
@@ -1087,6 +1147,7 @@ const I18N = {
     'meta.usage': '用量',
     'meta.models': '模型',
     'summary.sessions': 'sessions: {current} / {filtered} / {total}',
+    'summary.labels': 'labels: sessions {sessions} / events {events}',
     'summary.events': 'events: {visible}/{total}',
     'summary.eventsLoading': 'events: loading...',
     'summary.raw': 'raw {count}',
@@ -1122,6 +1183,11 @@ const I18N = {
     'status.sessions.emptyCopy': '请确认目标目录中是否存在 .jsonl 会话文件。',
     'status.sessions.refreshTitle': '正在刷新列表...',
     'status.sessions.refreshCopy': '正在重新获取最新会话。',
+    'status.labels.loadingTitle': '正在加载标签列表...',
+    'status.labels.loadingCopy': '正在整理带标签的会话和事件。',
+    'status.labels.errorTitle': '获取标签列表失败',
+    'status.labels.emptyTitle': '还没有带标签的项目',
+    'status.labels.emptyCopy': '给会话或事件添加标签后，会显示在这里。',
     'status.detail.loadingTitle': '正在加载会话详情...',
     'status.detail.loadingCopy': '正在获取事件。',
     'status.detail.errorTitle': '加载详情失败',
@@ -1164,6 +1230,12 @@ I18N['zh-Hant'] = {
   'todayUsage.error': '無法取得今天的 usage',
   'toolbar.heading': '搜尋與篩選',
   'toolbar.copy': '篩選條件會在下次啟動時繼續保留。',
+  'leftPane.tab.sessions': '工作階段列表',
+  'leftPane.tab.labels': '標籤列表',
+  'labelsPane.heading': '標籤列表',
+  'labelsPane.copy': '這裡集中列出帶標籤的工作階段與事件，可直接開啟。',
+  'labelsPane.group.sessions': '帶標籤的工作階段',
+  'labelsPane.group.events': '帶標籤的事件',
   'toolbar.filters.hide': '隱藏篩選',
   'toolbar.filters.show': '顯示篩選',
   'search.title': '搜尋',
@@ -1262,6 +1334,7 @@ I18N['zh-Hant'] = {
   'session.preview.empty': '(無預覽)',
   'meta.usage': '用量',
   'meta.models': '模型',
+  'summary.labels': 'labels: sessions {sessions} / events {events}',
   'usage.model': '模型',
   'usage.input': '輸入',
   'usage.cached': '快取',
@@ -1292,6 +1365,11 @@ I18N['zh-Hant'] = {
   'status.sessions.emptyCopy': '請確認目標目錄中是否存在 .jsonl 工作階段檔案。',
   'status.sessions.refreshTitle': '正在刷新列表...',
   'status.sessions.refreshCopy': '正在重新取得最新工作階段。',
+  'status.labels.loadingTitle': '正在載入標籤列表...',
+  'status.labels.loadingCopy': '正在整理帶標籤的工作階段與事件。',
+  'status.labels.errorTitle': '取得標籤列表失敗',
+  'status.labels.emptyTitle': '尚未有帶標籤的項目',
+  'status.labels.emptyCopy': '替工作階段或事件加上標籤後，就會顯示在這裡。',
   'status.detail.loadingTitle': '正在載入工作階段詳情...',
   'status.detail.loadingCopy': '正在取得事件。',
   'status.detail.errorTitle': '載入詳情失敗',
@@ -1409,6 +1487,11 @@ function applyMainLanguage(){
   document.getElementById('open_shortcuts').setAttribute('title', t('header.shortcuts'));
   setTextById('open_label_manager', t('header.labels'));
   setTextById('open_cost_summary', t('header.costs'));
+  setTextById('left_tab_sessions', t('leftPane.tab.sessions'));
+  setTextById('left_tab_labels', t('leftPane.tab.labels'));
+  setTextById('label_browser_kicker', t('labelsPane.kicker'));
+  setTextById('label_browser_heading', t('labelsPane.heading'));
+  setTextById('label_browser_copy', t('labelsPane.copy'));
   renderTodayUsageSummary();
   setText('.toolbar .section-kicker', t('toolbar.kicker'));
   setText('.toolbar .toolbar-heading', t('toolbar.heading'));
@@ -1525,7 +1608,9 @@ function applyMainLanguage(){
   updateMessageRangeSelectionModeButtonState();
   updateClearMessageRangeSelectionButtonState();
   updateMessageRangeFilterButtonsState();
+  renderLeftPaneTabs();
   renderSessionList();
+  renderLabeledList();
   renderSessionLabelStrip();
   renderActiveSession();
   initAllFlatpickr();
@@ -1563,6 +1648,7 @@ const DETAIL_INTERACTION_LOCK_MS = 4000;
 let loadSessionsTimer = null;
 let loadSessionsRequestSeq = 0;
 let loadSessionDetailRequestSeq = 0;
+let loadLabeledItemsRequestSeq = 0;
 let todayUsageSummaryRequestSeq = 0;
 let saveFiltersFrame = 0;
 let deferredDetailSyncTimer = 0;
@@ -1582,6 +1668,7 @@ let detailKeywordCurrentMatchIndex = -1;
 let pendingDetailKeywordFocusIndex = -1;
 let detailKeywordSearchTotal = 0;
 let pendingEventsScrollRestoreTop = null;
+let pendingLabeledEventFocusId = '';
 
 function esc(s){
   return (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1639,6 +1726,46 @@ function updateFilterVisibility(){
   }
 }
 
+function normalizeLeftPaneTab(value){
+  return value === 'labels' ? 'labels' : 'sessions';
+}
+
+function renderLeftPaneTabs(){
+  const activeTab = normalizeLeftPaneTab(state.leftPaneTab);
+  state.leftPaneTab = activeTab;
+  document.querySelectorAll('.left-pane-tab').forEach((button) => {
+    const isActive = button.dataset.paneTab === activeTab;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  const sessionsPanel = document.getElementById('left_panel_sessions');
+  const labelsPanel = document.getElementById('left_panel_labels');
+  if(sessionsPanel){
+    sessionsPanel.classList.toggle('hidden', activeTab !== 'sessions');
+  }
+  if(labelsPanel){
+    labelsPanel.classList.toggle('hidden', activeTab !== 'labels');
+  }
+}
+
+function setActiveLeftPaneTab(nextTab){
+  const normalized = normalizeLeftPaneTab(nextTab);
+  if(state.leftPaneTab === normalized){
+    renderLeftPaneTabs();
+    if(normalized === 'labels' && !state.hasLoadedLabeled && !state.isLabeledLoading){
+      void loadLabeledItems({ mode: 'initial' });
+    }
+    return;
+  }
+
+  state.leftPaneTab = normalized;
+  renderLeftPaneTabs();
+  saveFiltersSoon();
+  if(normalized === 'labels' && !state.hasLoadedLabeled && !state.isLabeledLoading){
+    void loadLabeledItems({ mode: 'initial' });
+  }
+}
+
 function setFiltersVisible(nextVisible){
   filtersVisible = !!nextVisible;
   updateFilterVisibility();
@@ -1668,11 +1795,16 @@ function setDetailActionsVisible(nextVisible){
 function updateDetailMetaVisibility(){
   const meta = document.getElementById('meta');
   const button = document.getElementById('toggle_meta');
+  const headerMain = document.querySelector('.header-main');
   if(!meta || !button){
     return;
   }
   const hasContent = meta.textContent.trim() !== '';
-  meta.classList.toggle('hidden', !detailMetaVisible || !hasContent);
+  const isHidden = !detailMetaVisible || !hasContent;
+  meta.classList.toggle('hidden', isHidden);
+  if(headerMain){
+    headerMain.classList.toggle('meta-hidden', isHidden);
+  }
   button.textContent = detailMetaVisible ? t('header.meta.hide') : t('header.meta.show');
   button.setAttribute('aria-pressed', detailMetaVisible ? 'true' : 'false');
   button.disabled = !hasContent;
@@ -1961,7 +2093,7 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
     ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">${esc(t('copy.single'))}</button>`
     : '';
   const systemLabelsHtml = systemLabels.map(label => `<span class="badge-kind badge-system-label">${esc(label)}</span>`).join('');
-  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(kindLabel)}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
+  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}" data-event-id="${esc(ev.event_id || '')}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(kindLabel)}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
 }
 
 function attachVisibleEventCardHandlers(eventsBox, startIndex, endIndex){
@@ -2096,7 +2228,9 @@ async function loadLabels(reloadSessions){
   state.labels = data.labels || [];
   populateLabelControls();
   if(reloadSessions && prev !== JSON.stringify(state.labels)){
-    await loadSessions({ mode: 'labels' });
+    await refreshLabeledViews();
+  } else if(shouldReloadLabeledItems()){
+    renderLabeledList();
   }
 }
 
@@ -3186,6 +3320,29 @@ function focusDetailKeywordMatch(eventsBox, matchIndex){
   }
 }
 
+function focusEventCard(eventId){
+  if(!eventId){
+    return false;
+  }
+  const target = Array.from(document.querySelectorAll('#events .ev')).find(node => node.dataset.eventId === eventId);
+  if(!target){
+    return false;
+  }
+  target.scrollIntoView({ block: 'center', inline: 'nearest' });
+  target.classList.add('label-navigation-hit');
+  window.setTimeout(() => {
+    target.classList.remove('label-navigation-hit');
+  }, 1600);
+  return true;
+}
+
+async function openLabeledEvent(path, eventId){
+  pendingLabeledEventFocusId = eventId || '';
+  clearDetailFilters();
+  await openSession(path, { mode: 'open', preserveLabeledFocus: true });
+  focusEventCard(eventId);
+}
+
 function isAutomaticSessionsLoadMode(mode){
   return mode === 'auto' || mode === 'focus';
 }
@@ -3685,6 +3842,41 @@ async function loadSessions(options){
   }
 }
 
+function shouldReloadLabeledItems(){
+  return state.leftPaneTab === 'labels' || state.hasLoadedLabeled;
+}
+
+async function loadLabeledItems(options){
+  const requestId = ++loadLabeledItemsRequestSeq;
+  const loadMode = options && options.mode ? options.mode : 'auto';
+  state.isLabeledLoading = true;
+  if(loadMode !== 'labels'){
+    state.labeledError = '';
+  }
+  renderLabeledList();
+  try {
+    const response = await fetch('/api/labeled-items?ts=' + Date.now(), { cache: 'no-store' });
+    const data = await response.json();
+    if(requestId !== loadLabeledItemsRequestSeq){
+      return;
+    }
+    state.labeledSessions = Array.isArray(data.sessions) ? data.sessions : [];
+    state.labeledEvents = Array.isArray(data.events) ? data.events : [];
+    state.labeledError = data.error || '';
+  } catch (error) {
+    if(requestId !== loadLabeledItemsRequestSeq){
+      return;
+    }
+    state.labeledError = normalizeRequestError(error, t('status.labels.errorTitle'));
+  } finally {
+    if(requestId === loadLabeledItemsRequestSeq){
+      state.isLabeledLoading = false;
+      state.hasLoadedLabeled = true;
+      renderLabeledList();
+    }
+  }
+}
+
 function saveFilters(){
   const dateFromIso = parseDateInputToIso(getFpDateValue('date_from'));
   const dateToIso = parseDateInputToIso(getFpDateValue('date_to'));
@@ -3719,6 +3911,7 @@ function saveFilters(){
     filters_visible: filtersVisible,
     detail_actions_visible: detailActionsVisible,
     left_pane_visible: leftPaneVisible,
+    left_pane_tab: state.leftPaneTab,
     panel_defaults_v: 2,
   };
   try {
@@ -3765,6 +3958,7 @@ function restoreFilters(){
       if(typeof data.detail_actions_visible === 'boolean') detailActionsVisible = data.detail_actions_visible;
     }
     if(typeof data.left_pane_visible === 'boolean') leftPaneVisible = data.left_pane_visible;
+    if(typeof data.left_pane_tab === 'string') state.leftPaneTab = normalizeLeftPaneTab(data.left_pane_tab);
   } catch (e) {
     // Ignore invalid saved filters.
   }
@@ -3855,6 +4049,102 @@ function applyFilter(){
   renderSessionList();
 }
 
+function renderSessionCard(session, options){
+  const opts = options || {};
+  const className = opts.className || 'session-item';
+  const isActive = !!opts.active;
+  return `
+      <div class="${className}${isActive ? ' active' : ''}" data-path="${esc(session.path)}">
+        <div class="session-meta-row session-meta-row-secondary">
+          <div class="session-badge session-cwd">${esc(session.cwd || '-')}</div>
+        </div>
+        <div class="session-meta-row session-meta-row-primary">
+          <div class="session-badge session-time">${esc(fmt(session.started_at || session.mtime))}</div>
+          <div class="session-badge session-source source-${esc(normalizeSource(session.source))}">${esc(sourceLabel(session.source))}</div>
+        </div>
+        <div class="session-preview">${esc(session.first_real_user_text || session.first_user_text || t('session.preview.empty'))}</div>
+        ${(session.session_label_ids || session.session_labels || []).length ? `<div class="session-label-row">${renderAssignedLabels(session.session_labels && session.session_labels.length ? session.session_labels : resolveLabelsById(session.session_label_ids))}</div>` : ''}
+      </div>
+    `;
+}
+
+function getLabeledEventKindLabel(item){
+  const kindKey = `labelsPane.kind.${item.kind || 'message'}`;
+  const base = t(kindKey);
+  if(item.kind === 'message' && item.role){
+    return `${base} / ${item.role}`;
+  }
+  return base;
+}
+
+function getLabeledEventKindClass(item){
+  if(item.kind === 'token_usage'){
+    return 'kind-token';
+  }
+  if(item.kind === 'function_call' || item.kind === 'function_output'){
+    return 'kind-tool';
+  }
+  return 'kind-message';
+}
+
+function renderLabeledSessionCard(session){
+  return `
+    <div class="labeled-item ${state.activePath === session.path ? 'active' : ''}" data-item-kind="session" data-path="${esc(session.path)}">
+      <div class="labeled-item-row">
+        <span class="labeled-item-badge type-session">${esc(t('labelsPane.item.session'))}</span>
+        <div class="session-badge session-time">${esc(fmt(session.started_at || session.mtime))}</div>
+        <div class="session-badge session-source source-${esc(normalizeSource(session.source))}">${esc(sourceLabel(session.source))}</div>
+      </div>
+      <div class="labeled-item-row">
+        <div class="session-badge session-cwd">${esc(session.cwd || '-')}</div>
+      </div>
+      <div class="labeled-item-row">
+        <div class="labeled-item-preview">${esc(session.first_real_user_text || session.first_user_text || t('session.preview.empty'))}</div>
+      </div>
+      <div class="labeled-item-row session-label-row">${renderAssignedLabels(session.session_labels && session.session_labels.length ? session.session_labels : resolveLabelsById(session.session_label_ids))}</div>
+      <div class="labeled-item-row">
+        <div class="labeled-item-path">${highlightSessionPath(session.relative_path)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderLabeledEventCard(item){
+  const isActive = state.activePath === item.path && pendingLabeledEventFocusId === item.event_id;
+  return `
+    <div class="labeled-item ${isActive ? 'active' : ''}" data-item-kind="event" data-path="${esc(item.path)}" data-event-id="${esc(item.event_id)}">
+      <div class="labeled-item-row">
+        <span class="labeled-item-badge type-event">${esc(t('labelsPane.item.event'))}</span>
+        <span class="labeled-item-badge ${esc(getLabeledEventKindClass(item))}">${esc(getLabeledEventKindLabel(item))}</span>
+        <div class="session-badge session-time">${esc(fmt(item.timestamp || item.session_started_at || item.session_mtime))}</div>
+        <div class="session-badge session-source source-${esc(normalizeSource(item.source))}">${esc(sourceLabel(item.source))}</div>
+      </div>
+      <div class="labeled-item-row">
+        <div class="session-badge session-cwd">${esc(item.cwd || '-')}</div>
+      </div>
+      <div class="labeled-item-row">
+        <div class="labeled-item-preview">${esc(item.preview || t('session.preview.empty'))}</div>
+      </div>
+      <div class="labeled-item-row session-label-row">${renderAssignedLabels(item.labels || [])}</div>
+      <div class="labeled-item-row">
+        <div class="labeled-item-path">${highlightSessionPath(item.relative_path)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderLabeledGroup(title, count, cardsHtml){
+  return `
+    <section class="labeled-group">
+      <div class="labeled-group-head">
+        <div class="labeled-group-title">${esc(title)}</div>
+        <div class="labeled-group-count">${esc(String(count))}</div>
+      </div>
+      ${cardsHtml}
+    </section>
+  `;
+}
+
 function renderSessionList(){
   const box = document.getElementById('sessions');
   updateReloadButtonState();
@@ -3883,19 +4173,7 @@ function renderSessionList(){
           'empty'
         );
   } else {
-    box.innerHTML = state.filtered.map(s => `
-      <div class="session-item ${state.activePath === s.path ? 'active' : ''}" data-path="${esc(s.path)}">
-        <div class="session-meta-row session-meta-row-secondary">
-          <div class="session-badge session-cwd">${esc(s.cwd || '-')}</div>
-        </div>
-        <div class="session-meta-row session-meta-row-primary">
-          <div class="session-badge session-time">${esc(fmt(s.started_at || s.mtime))}</div>
-          <div class="session-badge session-source source-${esc(normalizeSource(s.source))}">${esc(sourceLabel(s.source))}</div>
-        </div>
-        <div class="session-preview">${esc(s.first_real_user_text || s.first_user_text || t('session.preview.empty'))}</div>
-        ${(s.session_label_ids || s.session_labels || []).length ? `<div class="session-label-row">${renderAssignedLabels(s.session_labels && s.session_labels.length ? s.session_labels : resolveLabelsById(s.session_label_ids))}</div>` : ''}
-      </div>
-    `).join('');
+    box.innerHTML = state.filtered.map(s => renderSessionCard(s, { active: state.activePath === s.path })).join('');
   }
   if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
     setStatusLayer(
@@ -3916,6 +4194,70 @@ function renderSessionList(){
     } else {
       countEl.textContent = '';
     }
+  }
+}
+
+function renderLabeledList(){
+  const box = document.getElementById('labeled_items');
+  const countEl = document.getElementById('labeled_count');
+  if(!box){
+    return;
+  }
+
+  const sessionCount = state.labeledSessions.length;
+  const eventCount = state.labeledEvents.length;
+  if(state.isLabeledLoading && !state.hasLoadedLabeled){
+    box.innerHTML = renderInlineStatus(
+      t('status.labels.loadingTitle'),
+      t('status.labels.loadingCopy'),
+      'loading'
+    );
+  } else if(state.labeledError && sessionCount === 0 && eventCount === 0){
+    box.innerHTML = renderInlineStatus(
+      t('status.labels.errorTitle'),
+      state.labeledError,
+      'error'
+    );
+  } else if(sessionCount === 0 && eventCount === 0){
+    box.innerHTML = renderInlineStatus(
+      t('status.labels.emptyTitle'),
+      t('status.labels.emptyCopy'),
+      'empty'
+    );
+  } else {
+    const groups = [];
+    if(sessionCount > 0){
+      groups.push(renderLabeledGroup(
+        t('labelsPane.group.sessions'),
+        sessionCount,
+        state.labeledSessions.map(renderLabeledSessionCard).join('')
+      ));
+    }
+    if(eventCount > 0){
+      groups.push(renderLabeledGroup(
+        t('labelsPane.group.events'),
+        eventCount,
+        state.labeledEvents.map(renderLabeledEventCard).join('')
+      ));
+    }
+    box.innerHTML = groups.join('');
+  }
+
+  if(countEl){
+    countEl.textContent = state.hasLoadedLabeled
+      ? t('summary.labels', { sessions: sessionCount, events: eventCount })
+      : '';
+  }
+
+  if(state.isLabeledLoading && state.hasLoadedLabeled){
+    setStatusLayer(
+      'labeled_items_status',
+      t('status.labels.loadingTitle'),
+      t('status.labels.loadingCopy'),
+      'loading'
+    );
+  } else {
+    setStatusLayer('labeled_items_status');
   }
 }
 
@@ -4026,6 +4368,13 @@ ${getCopyableEventText(ev)}`;
   }).join('\n\n-----\n\n');
 }
 
+async function refreshLabeledViews(){
+  await loadSessions({ mode: 'labels' });
+  if(shouldReloadLabeledItems()){
+    await loadLabeledItems({ mode: 'labels' });
+  }
+}
+
 async function removeSessionLabel(labelId){
   if(!state.activePath) return;
   const data = await postJson('/api/session-label/remove', {
@@ -4036,7 +4385,7 @@ async function removeSessionLabel(labelId){
     alert(data.error);
     return;
   }
-  await loadSessions({ mode: 'labels' });
+  await refreshLabeledViews();
 }
 
 async function addSessionLabelFromButton(button){
@@ -4050,7 +4399,7 @@ async function addSessionLabelFromButton(button){
       alert(data.error);
       return;
     }
-    await loadSessions({ mode: 'labels' });
+    await refreshLabeledViews();
   });
 }
 
@@ -4066,7 +4415,7 @@ async function addEventLabelFromButton(button, eventId){
       alert(data.error);
       return;
     }
-    await loadSessions({ mode: 'labels' });
+    await refreshLabeledViews();
   });
 }
 
@@ -4081,7 +4430,7 @@ async function removeEventLabel(eventId, labelId){
     alert(data.error);
     return;
   }
-  await loadSessions({ mode: 'labels' });
+  await refreshLabeledViews();
 }
 
 async function copyDisplayedMessages(){
@@ -4414,6 +4763,9 @@ async function openSession(path, options){
   const nextSession = state.sessions.find(s => s.path === path) || null;
   const previousPath = state.activeSession && state.activeSession.path ? state.activeSession.path : state.activePath;
   const loadMode = options && options.mode ? options.mode : 'open';
+  if(!(options && options.preserveLabeledFocus)){
+    pendingLabeledEventFocusId = '';
+  }
   if(loadMode !== 'sync'){
     pendingAutomaticDetailSync = false;
     clearDeferredDetailSyncTimer();
@@ -4630,6 +4982,12 @@ function triggerViewerRefresh(){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
   }
+  if(state.leftPaneTab === 'labels'){
+    void loadLabels(false)
+      .then(() => loadLabeledItems({ mode: 'reload' }))
+      .then(() => loadTodayUsageSummary());
+    return;
+  }
   void loadSessions({ mode: 'reload' }).then(() => loadTodayUsageSummary());
 }
 
@@ -4752,6 +5110,11 @@ function initViewerPage(){
     tab.addEventListener('click', () => {
       setActiveSortOrder(tab.dataset.sort);
       scheduleLoadSessions();
+    });
+  });
+  document.querySelectorAll('.left-pane-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      setActiveLeftPaneTab(tab.dataset.paneTab);
     });
   });
   safeBindById('session_label_filter', 'change', scheduleLoadSessions);
@@ -5059,6 +5422,17 @@ function initViewerPage(){
       openSession(item.dataset.path);
     }
   });
+  document.getElementById('labeled_items').addEventListener('click', async (event) => {
+    const item = event.target.closest('.labeled-item');
+    if(!item || !item.dataset.path){
+      return;
+    }
+    if(item.dataset.itemKind === 'event' && item.dataset.eventId){
+      await openLabeledEvent(item.dataset.path, item.dataset.eventId);
+      return;
+    }
+    openSession(item.dataset.path, { mode: 'open' });
+  });
   window.addEventListener('pointerup', () => {
     if(!detailPointerDown){
       return;
@@ -5094,7 +5468,7 @@ function initViewerPage(){
     if(labelManagerWindow && !labelManagerWindow.closed && event.source !== labelManagerWindow) return;
     if(!event.data || event.data.type !== 'labels-updated') return;
     await loadLabels(false);
-    await loadSessions({ mode: 'labels' });
+    await refreshLabeledViews();
   });
   window.addEventListener('storage', (event) => {
     if(event.key !== LANGUAGE_STORAGE_KEY){
@@ -5126,6 +5500,8 @@ function initViewerPage(){
   updateFilterVisibility();
   updateDetailMetaVisibility();
   updateLeftPaneVisibility();
+  renderLeftPaneTabs();
+  renderLabeledList();
   updateDetailActionsVisibility();
   state.isSessionsLoading = true;
   renderSessionList();
@@ -5134,6 +5510,9 @@ function initViewerPage(){
     .finally(() => {
       void loadTodayUsageSummary();
       void loadSessions({ mode: 'initial' });
+      if(state.leftPaneTab === 'labels'){
+        void loadLabeledItems({ mode: 'initial' });
+      }
     });
 }
 

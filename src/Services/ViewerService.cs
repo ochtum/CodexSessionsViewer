@@ -90,6 +90,55 @@ public sealed partial class ViewerService
         return new LabelsResponse { Labels = snapshot.Labels };
     }
 
+    public async Task<LabeledItemsResponse> GetLabeledItemsAsync(CancellationToken cancellationToken = default)
+    {
+        var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
+        var labeledSessions = new List<SessionSummaryDto>();
+        var labeledEvents = new List<LabeledEventListItemDto>();
+
+        foreach (var path in EnumerateSessionFiles(GetSessionRoots()))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            IndexRecord record;
+            try
+            {
+                record = GetOrBuildIndexRecord(path);
+            }
+            catch (FileNotFoundException)
+            {
+                continue;
+            }
+
+            var sessionPath = record.Summary.Path;
+            if (snapshot.SessionLabels.TryGetValue(sessionPath, out var sessionLabelIds))
+            {
+                var labels = ResolveLabels(sessionLabelIds, snapshot.LabelById);
+                if (labels.Count > 0)
+                {
+                    labeledSessions.Add(WithSessionLabels(record.Summary, sessionLabelIds, labels));
+                }
+            }
+
+            if (snapshot.EventLabels.TryGetValue(sessionPath, out var labelsByEventId) && labelsByEventId.Count > 0)
+            {
+                labeledEvents.AddRange(BuildLabeledEventItems(path, record.Summary, labelsByEventId, snapshot.LabelById, cancellationToken));
+            }
+        }
+
+        return new LabeledItemsResponse
+        {
+            Sessions = labeledSessions
+                .OrderByDescending(GetSessionSortKey, StringComparer.Ordinal)
+                .ThenByDescending(session => session.Mtime, StringComparer.Ordinal)
+                .ToArray(),
+            Events = labeledEvents
+                .OrderByDescending(item => !string.IsNullOrWhiteSpace(item.Timestamp) ? item.Timestamp : item.SessionStartedAt, StringComparer.Ordinal)
+                .ThenByDescending(item => item.SessionMtime, StringComparer.Ordinal)
+                .ToArray(),
+        };
+    }
+
     public ModelCatalogStatusDto GetModelCatalogStatus()
     {
         return _modelCatalog.GetStatus();
@@ -419,6 +468,166 @@ public sealed partial class ViewerService
             && eventMap.Values.Any(labelIds => labelIds.Contains(labelId));
     }
 
+    private IEnumerable<LabeledEventListItemDto> BuildLabeledEventItems(
+        string path,
+        SessionSummaryDto session,
+        IReadOnlyDictionary<string, IReadOnlyList<int>> labelsByEventId,
+        IReadOnlyDictionary<int, LabelDto> labelById,
+        CancellationToken cancellationToken)
+    {
+        if (labelsByEventId.Count == 0)
+        {
+            yield break;
+        }
+
+        var targetEventIds = labelsByEventId.Keys
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+        if (targetEventIds.Count == 0)
+        {
+            yield break;
+        }
+
+        TokenUsageSnapshot? previousTotals = null;
+        var currentModel = string.Empty;
+        var rawLineCount = 0;
+
+        foreach (var line in File.ReadLines(path))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            rawLineCount++;
+
+            if (!TryParseJson(line, out var root))
+            {
+                continue;
+            }
+
+            using (root)
+            {
+                var element = root.RootElement;
+                var type = GetString(element, "type");
+                var timestamp = GetString(element, "timestamp");
+                if (!element.TryGetProperty("payload", out var payload))
+                {
+                    continue;
+                }
+
+                if (type == "turn_context")
+                {
+                    var turnModel = ExtractModelName(payload);
+                    if (!string.IsNullOrWhiteSpace(turnModel))
+                    {
+                        currentModel = turnModel;
+                    }
+
+                    continue;
+                }
+
+                var eventId = $"line-{rawLineCount}";
+
+                if (type == "event_msg" && GetString(payload, "type") == "token_count")
+                {
+                    var usageEvent = BuildTokenUsageEvent(
+                        payload,
+                        timestamp,
+                        rawLineCount,
+                        ref currentModel,
+                        ref previousTotals);
+                    if (usageEvent is null || !targetEventIds.Contains(eventId))
+                    {
+                        continue;
+                    }
+
+                    var labels = ResolveLabels(labelsByEventId[eventId], labelById);
+                    if (labels.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    yield return ToLabeledEventItem(session, usageEvent, labels);
+                    continue;
+                }
+
+                if (!targetEventIds.Contains(eventId))
+                {
+                    continue;
+                }
+
+                SessionEventDto? @event = null;
+                if (type == "response_item")
+                {
+                    var responseType = GetString(payload, "type");
+                    if (responseType == "message")
+                    {
+                        var role = GetString(payload, "role");
+                        var text = ExtractTextFromContent(payload);
+                        var systemLabels = Array.Empty<string>();
+                        if (role == "user")
+                        {
+                            role = ClassifyUserMessage(text);
+                            systemLabels = DetectUserMessageSystemLabels(text);
+                        }
+
+                        @event = new SessionEventDto
+                        {
+                            EventId = eventId,
+                            Timestamp = timestamp,
+                            Kind = "message",
+                            Role = role,
+                            Text = text,
+                            SystemLabels = systemLabels,
+                        };
+                    }
+                    else if (responseType == "function_call")
+                    {
+                        @event = new SessionEventDto
+                        {
+                            EventId = eventId,
+                            Timestamp = timestamp,
+                            Kind = "function_call",
+                            Name = GetString(payload, "name"),
+                            Arguments = GetValueText(payload, "arguments"),
+                        };
+                    }
+                    else if (responseType == "function_call_output")
+                    {
+                        @event = new SessionEventDto
+                        {
+                            EventId = eventId,
+                            Timestamp = timestamp,
+                            Kind = "function_output",
+                            CallId = GetString(payload, "call_id"),
+                            Output = GetValueText(payload, "output"),
+                        };
+                    }
+                }
+                else if (type == "event_msg" && GetString(payload, "type") == "agent_message")
+                {
+                    @event = new SessionEventDto
+                    {
+                        EventId = eventId,
+                        Timestamp = timestamp,
+                        Kind = "agent_update",
+                        Text = GetValueText(payload, "message"),
+                    };
+                }
+
+                if (@event is null)
+                {
+                    continue;
+                }
+
+                var resolvedLabels = ResolveLabels(labelsByEventId[eventId], labelById);
+                if (resolvedLabels.Count == 0)
+                {
+                    continue;
+                }
+
+                yield return ToLabeledEventItem(session, @event, resolvedLabels);
+            }
+        }
+    }
+
     private static IReadOnlyList<LabelDto> ResolveLabels(IEnumerable<int> ids, IReadOnlyDictionary<int, LabelDto> labelById)
     {
         return ids
@@ -439,6 +648,65 @@ public sealed partial class ViewerService
     private static SessionSummaryDto WithSessionLabels(SessionSummaryDto session, IReadOnlyList<int> labelIds, IReadOnlyList<LabelDto> labels)
     {
         return session with { SessionLabelIds = labelIds, SessionLabels = labels };
+    }
+
+    private static LabeledEventListItemDto ToLabeledEventItem(
+        SessionSummaryDto session,
+        SessionEventDto @event,
+        IReadOnlyList<LabelDto> labels)
+    {
+        return new LabeledEventListItemDto
+        {
+            Path = session.Path,
+            RelativePath = session.RelativePath,
+            SessionId = session.SessionId,
+            SessionStartedAt = session.StartedAt,
+            SessionMtime = session.Mtime,
+            Cwd = session.Cwd,
+            Source = session.Source,
+            EventId = @event.EventId,
+            Timestamp = @event.Timestamp,
+            Kind = @event.Kind,
+            Role = @event.Role,
+            Preview = BuildLabeledEventPreview(@event),
+            Labels = labels,
+        };
+    }
+
+    private static string BuildLabeledEventPreview(SessionEventDto @event)
+    {
+        var text = @event.Kind switch
+        {
+            "message" => @event.Text,
+            "function_call" => string.Join(' ', new[] { @event.Name, @event.Arguments }.Where(value => !string.IsNullOrWhiteSpace(value))),
+            "function_output" => @event.Output,
+            "agent_update" => @event.Text,
+            "token_usage" => BuildTokenUsagePreview(@event),
+            _ => string.Join(' ', new[] { @event.Text, @event.Output, @event.Arguments }.Where(value => !string.IsNullOrWhiteSpace(value))),
+        };
+
+        return string.IsNullOrWhiteSpace(text)
+            ? string.Empty
+            : CollapseNewlines(text, 220);
+    }
+
+    private static string BuildTokenUsagePreview(SessionEventDto @event)
+    {
+        var parts = new List<string>
+        {
+            $"total {@event.TotalTokens.ToString("N0", CultureInfo.InvariantCulture)}"
+        };
+        if (@event.CachedInputTokens > 0)
+        {
+            parts.Add($"cache {@event.CachedInputTokens.ToString("N0", CultureInfo.InvariantCulture)}");
+        }
+
+        if (@event.CostUsd.HasValue)
+        {
+            parts.Add($"cost ${@event.CostUsd.Value.ToString("0.####", CultureInfo.InvariantCulture)}");
+        }
+
+        return string.Join(" / ", parts);
     }
 
     private static IReadOnlyList<CostSummaryGroupDefinition> BuildCostSummaryGroupDefinitions(DateTime nowLocal)
