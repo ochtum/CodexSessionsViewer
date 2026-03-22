@@ -714,6 +714,7 @@ const I18N = {
     'shortcut.onlyAi': 'AIレスポンスのみ表示を切り替え',
     'shortcut.turnBoundary': '各入力と最終応答のみを切り替え',
     'shortcut.reverse': '表示順を逆にするを切り替え',
+    'shortcut.onlyTokenUsage': 'token usageのみ表示を切り替え',
     'shortcut.clearDetail': '右ペインの表示条件と操作状態をクリア',
     'shortcut.toggleActions': '詳細操作の表示と非表示を切り替え',
     'shortcut.copyResume': 'セッション再開コマンドをコピー',
@@ -930,6 +931,7 @@ const I18N = {
     'shortcut.onlyAi': 'Toggle only AI responses',
     'shortcut.turnBoundary': 'Toggle only each input and final reply',
     'shortcut.reverse': 'Toggle reverse order',
+    'shortcut.onlyTokenUsage': 'Toggle only token usage',
     'shortcut.clearDetail': 'Clear right-pane filters and active modes',
     'shortcut.toggleActions': 'Toggle detail actions',
     'shortcut.copyResume': 'Copy the session resume command',
@@ -1146,6 +1148,7 @@ const I18N = {
     'shortcut.onlyAi': '切换仅显示 AI 回复',
     'shortcut.turnBoundary': '切换仅显示每次输入与最终回复',
     'shortcut.reverse': '切换反转显示顺序',
+    'shortcut.onlyTokenUsage': '切换仅显示 token usage',
     'shortcut.clearDetail': '清除右侧筛选与当前模式',
     'shortcut.toggleActions': '切换详细操作显示',
     'shortcut.copyResume': '复制会话恢复命令',
@@ -1344,6 +1347,7 @@ I18N['zh-Hant'] = {
   'shortcut.onlyAi': '切換僅顯示 AI 回覆',
   'shortcut.turnBoundary': '切換僅顯示每次輸入與最終回覆',
   'shortcut.reverse': '切換反轉顯示順序',
+  'shortcut.onlyTokenUsage': '切換僅顯示 token usage',
   'shortcut.clearDetail': '清除右側篩選與目前模式',
   'shortcut.toggleActions': '切換詳細操作顯示',
   'shortcut.copyResume': '複製工作階段恢復命令',
@@ -1610,6 +1614,7 @@ function applyMainLanguage(){
     'shortcut.onlyAi',
     'shortcut.turnBoundary',
     'shortcut.reverse',
+    'shortcut.onlyTokenUsage',
     'shortcut.clearDetail',
     'shortcut.toggleActions',
     'shortcut.copyResume',
@@ -5699,6 +5704,12 @@ function initViewerPage(){
   }
   if(event.code === 'Digit4'){
     if(triggerCheckboxShortcut('reverse_order')){
+      event.preventDefault();
+    }
+    return;
+  }
+  if(event.code === 'Digit5'){
+    if(triggerCheckboxShortcut('only_token_usage')){
       event.preventDefault();
     }
     return;
