@@ -1939,15 +1939,37 @@ function setActiveEvents(events){
   state.activeEvents = Array.isArray(events) ? events : [];
 }
 
+function buildLabelOptionText(label){
+  return `● ${label.name || ''}`;
+}
+
+function updateLabelSelectColor(selectId){
+  const select = document.getElementById(selectId);
+  if(!select){
+    return;
+  }
+  const label = state.labels.find(item => String(item.id) === String(select.value));
+  select.style.color = label && label.color_value ? label.color_value : '';
+}
+
 function populateLabelSelect(selectId, allLabel){
   const select = document.getElementById(selectId);
+  if(!select){
+    return;
+  }
   const current = select.value;
-  const options = [`<option value="">${esc(allLabel)}</option>`].concat(
-    state.labels.map(label => `<option value="${esc(label.id)}">${esc(label.name)}</option>`)
-  );
-  select.innerHTML = options.join('');
+  select.innerHTML = '';
+  select.add(new Option(allLabel, ''));
+  state.labels.forEach(label => {
+    const option = new Option(buildLabelOptionText(label), String(label.id));
+    if(label && label.color_value){
+      option.style.color = label.color_value;
+    }
+    select.add(option);
+  });
   const hasCurrent = state.labels.some(label => String(label.id) === current);
   select.value = hasCurrent ? current : '';
+  updateLabelSelectColor(selectId);
 }
 
 function populateLabelControls(){
@@ -1961,6 +1983,7 @@ function populateLabelControls(){
       select.value = pending;
     }
     delete select.dataset.pendingValue;
+    updateLabelSelectColor(id);
   });
   renderSessionList();
   renderSessionLabelStrip();
@@ -3980,6 +4003,9 @@ function clearFilters(){
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
   document.getElementById('detail_event_label_filter').value = '';
+  updateLabelSelectColor('session_label_filter');
+  updateLabelSelectColor('event_label_filter');
+  updateLabelSelectColor('detail_event_label_filter');
   refreshDateTimeInputPairStates();
   saveFilters();
   if(loadSessionsTimer){
@@ -5117,9 +5143,16 @@ function initViewerPage(){
       setActiveLeftPaneTab(tab.dataset.paneTab);
     });
   });
-  safeBindById('session_label_filter', 'change', scheduleLoadSessions);
-  safeBindById('event_label_filter', 'change', scheduleLoadSessions);
+  safeBindById('session_label_filter', 'change', () => {
+    updateLabelSelectColor('session_label_filter');
+    scheduleLoadSessions();
+  });
+  safeBindById('event_label_filter', 'change', () => {
+    updateLabelSelectColor('event_label_filter');
+    scheduleLoadSessions();
+  });
   safeBindById('detail_event_label_filter', 'change', () => {
+    updateLabelSelectColor('detail_event_label_filter');
     saveFilters();
     renderActiveSession();
   });
