@@ -1740,7 +1740,7 @@ function updateReloadButtonState(){
   if(!button){
     return;
   }
-  const isManualReload = state.isSessionsLoading && state.sessionsLoadMode === 'reload';
+  const isManualReload = state.isSessionsLoading && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'reload_refresh');
   button.disabled = isManualReload;
   button.textContent = isManualReload ? 'Reloading...' : 'Reload';
 }
@@ -4449,7 +4449,7 @@ function renderSessionList(){
   } else {
     box.innerHTML = state.filtered.map(s => renderSessionCard(s, { active: state.activePath === s.path })).join('');
   }
-  if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
+  if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'reload_refresh' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
     setStatusLayer(
       'sessions_status',
       t('status.sessions.refreshTitle'),
@@ -5191,22 +5191,26 @@ function triggerCheckboxShortcut(id){
   return true;
 }
 
-function triggerViewerRefresh(){
-  if(state.activePath){
-    void refreshActiveSession();
-    return;
-  }
+async function triggerViewerRefresh(){
   if(loadSessionsTimer){
     clearTimeout(loadSessionsTimer);
     loadSessionsTimer = null;
   }
   if(state.leftPaneTab === 'labels'){
-    void loadLabels(false)
-      .then(() => loadLabeledItems({ mode: 'reload' }))
-      .then(() => loadTodayUsageSummary());
+    await loadLabels(false);
+    await loadLabeledItems({ mode: 'reload' });
+    if(state.activePath){
+      await openSession(state.activePath, { mode: 'refresh' });
+    }
+    await loadTodayUsageSummary();
     return;
   }
-  void loadSessions({ mode: 'reload' }).then(() => loadTodayUsageSummary());
+  const loadMode = state.activePath ? 'reload_refresh' : 'reload';
+  await loadSessions({ mode: loadMode });
+  if(loadMode === 'reload_refresh' && state.activePath){
+    await openSession(state.activePath, { mode: 'refresh' });
+  }
+  await loadTodayUsageSummary();
 }
 
 function moveDetailKeywordSearchByShortcut(step){
