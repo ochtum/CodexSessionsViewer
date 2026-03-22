@@ -157,7 +157,9 @@ Tooltips for major buttons and toggles also show the corresponding keyboard shor
 ## Notes
 
 - Label definitions and label assignments are stored in `.cache/label-store.json`.
-- To handle large logs, the list is limited to `300` sessions and the event view is limited to `2000` events.
+- Display limits can be changed in `.cache/viewer-settings.json`.
+- The default values are `session_list_max: 1000` and `session_events_max: 10000`.
+- If the file does not exist, it is created automatically on first startup.
 - The viewer is local-only and listens on `http://127.0.0.1:8765` by default. If the default port is already in use, it falls back to the next available port within the configured range.
 
 ---
@@ -184,7 +186,8 @@ Tooltips for major buttons and toggles also show the corresponding keyboard shor
 │   └── styles.css                     # Styles for the estimation tool
 └── src/
     ├── .cache/
-    │   └── label-store.json           # Storage for label definitions and assignments
+    │   ├── label-store.json           # Storage for label definitions and assignments
+    │   └── viewer-settings.json       # Display-count settings for session list and detail events
     ├── CodexSessionsViewer.sln        # Solution
     ├── CodexSessionsViewer.csproj     # ASP.NET Core / Blazor project definition
     ├── Program.cs                     # App startup, URL configuration, and API endpoints

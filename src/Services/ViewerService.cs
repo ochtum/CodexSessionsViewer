@@ -10,8 +10,6 @@ namespace CodexSessionsViewer.Services;
 
 public sealed partial class ViewerService
 {
-    private const int MaxList = 300;
-    private const int MaxEvents = 2000;
     private const int SearchTextLimit = 50_000;
     private const int MaxCacheEntries = 500;
     private static readonly string DefaultSessionsDir = Path.Combine(
@@ -42,14 +40,16 @@ public sealed partial class ViewerService
     ];
 
     private readonly LabelStore _labelStore;
+    private readonly ViewerSettingsStore _viewerSettings;
     private readonly ModelCatalogService _modelCatalog;
     private readonly ConcurrentDictionary<string, SessionCacheEntry> _cache = new(PathComparer);
     private IReadOnlyList<string>? _sessionRoots;
     private IReadOnlyList<string>? _wslDistroRoots;
 
-    public ViewerService(LabelStore labelStore, ModelCatalogService modelCatalog)
+    public ViewerService(LabelStore labelStore, ViewerSettingsStore viewerSettings, ModelCatalogService modelCatalog)
     {
         _labelStore = labelStore;
+        _viewerSettings = viewerSettings;
         _modelCatalog = modelCatalog;
     }
 
@@ -277,6 +277,7 @@ public sealed partial class ViewerService
         CancellationToken cancellationToken = default)
     {
         var roots = GetSessionRoots();
+        var settings = _viewerSettings.GetSnapshot();
         var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
         var normalizedMode = string.Equals(mode, "or", StringComparison.OrdinalIgnoreCase) ? "or" : "and";
         var normalizedSort = sort is "asc" or "updated" ? sort : "desc";
@@ -336,7 +337,7 @@ public sealed partial class ViewerService
         return new SessionListResponse
         {
             Root = string.Join(" | ", roots),
-            Sessions = ordered.Take(MaxList).ToArray(),
+            Sessions = ordered.Take(settings.SessionListMax).ToArray(),
         };
     }
 
@@ -845,6 +846,8 @@ public sealed partial class ViewerService
             IndexRecord = built,
             EventsData = cached is not null && cached.Signature == signature ? cached.EventsData : null,
             PricingVersion = cached?.PricingVersion ?? 0,
+            ViewerSettingsVersion = cached?.ViewerSettingsVersion ?? 0,
+            MaxEvents = cached?.MaxEvents ?? 0,
         };
         _cache[path] = next;
         TrimCacheIfNeeded();
@@ -862,22 +865,27 @@ public sealed partial class ViewerService
 
         var signature = GetSignature(fileInfo);
         var pricingVersion = _modelCatalog.GetPricingVersion();
+        var settings = _viewerSettings.GetSnapshot();
         if (_cache.TryGetValue(path, out var cached)
             && cached.Signature == signature
             && cached.PricingVersion == pricingVersion
+            && cached.ViewerSettingsVersion == settings.Version
+            && cached.MaxEvents == settings.SessionEventsMax
             && cached.EventsData is not null)
         {
             cached.LastAccessedTicks = Environment.TickCount64;
             return cached.EventsData;
         }
 
-        var built = BuildEventsData(path);
+        var built = BuildEventsData(path, settings.SessionEventsMax);
         var next = new SessionCacheEntry
         {
             Signature = signature,
             IndexRecord = cached is not null && cached.Signature == signature ? cached.IndexRecord : null,
             EventsData = built,
             PricingVersion = pricingVersion,
+            ViewerSettingsVersion = settings.Version,
+            MaxEvents = settings.SessionEventsMax,
         };
         _cache[path] = next;
         TrimCacheIfNeeded();
@@ -1000,7 +1008,7 @@ public sealed partial class ViewerService
         return new IndexRecord(summary, searchText);
     }
 
-    private EventsData BuildEventsData(string path)
+    private EventsData BuildEventsData(string path, int maxEvents)
     {
         var events = new List<SessionEventDto>();
         var rawLineCount = 0;
@@ -1040,7 +1048,7 @@ public sealed partial class ViewerService
                     {
                         var role = GetString(payload, "role");
                         var text = ExtractTextFromContent(payload);
-                        if (!string.IsNullOrWhiteSpace(text) && events.Count < MaxEvents)
+                        if (!string.IsNullOrWhiteSpace(text) && events.Count < maxEvents)
                         {
                             var systemLabels = Array.Empty<string>();
                             if (role == "user")
@@ -1060,7 +1068,7 @@ public sealed partial class ViewerService
                             });
                         }
                     }
-                    else if (responseType == "function_call" && events.Count < MaxEvents)
+                    else if (responseType == "function_call" && events.Count < maxEvents)
                     {
                         events.Add(new SessionEventDto
                         {
@@ -1071,7 +1079,7 @@ public sealed partial class ViewerService
                             Arguments = GetValueText(payload, "arguments"),
                         });
                     }
-                    else if (responseType == "function_call_output" && events.Count < MaxEvents)
+                    else if (responseType == "function_call_output" && events.Count < maxEvents)
                     {
                         events.Add(new SessionEventDto
                         {
@@ -1086,7 +1094,7 @@ public sealed partial class ViewerService
                 else if (type == "event_msg")
                 {
                     var eventType = GetString(payload, "type");
-                    if (eventType == "agent_message" && events.Count < MaxEvents)
+                    if (eventType == "agent_message" && events.Count < maxEvents)
                     {
                         events.Add(new SessionEventDto
                         {
@@ -1107,7 +1115,7 @@ public sealed partial class ViewerService
                         if (usageEvent is not null)
                         {
                             usageAccumulator.Add(usageEvent);
-                            if (events.Count < MaxEvents)
+                            if (events.Count < maxEvents)
                             {
                                 events.Add(usageEvent);
                             }
@@ -2013,6 +2021,10 @@ public sealed partial class ViewerService
         public EventsData? EventsData { get; init; }
 
         public long PricingVersion { get; init; }
+
+        public long ViewerSettingsVersion { get; init; }
+
+        public int MaxEvents { get; init; }
 
         private long _lastAccessedTicks = Environment.TickCount64;
 

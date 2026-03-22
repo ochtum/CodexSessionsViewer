@@ -78,6 +78,7 @@ public class Program
         });
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<LabelStore>();
+        builder.Services.AddSingleton<ViewerSettingsStore>();
         builder.Services.AddSingleton<ModelCatalogService>();
         builder.Services.AddHostedService(provider => provider.GetRequiredService<ModelCatalogService>());
         builder.Services.AddSingleton<ViewerService>();
