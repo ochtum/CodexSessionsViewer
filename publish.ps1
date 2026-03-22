@@ -25,7 +25,7 @@ if (-not (Test-Path $projectPath)) {
 }
 
 if ($CleanOutput -and (Test-Path $outputDir)) {
-    Get-ChildItem -Path $outputDir -Force | Remove-Item -Recurse -Force
+    Get-ChildItem -Path $outputDir -Force | Where-Object { $_.Name -ne ".cache" } | Remove-Item -Recurse -Force
 }
 
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -87,6 +87,7 @@ if (-not (Test-Path $launcherPath)) {
     'setlocal'
     ('title {0}' -f $consoleWindowTitle)
     'pushd "%~dp0" >nul'
+    'set "SESSIONS_VIEWER_APP_ROOT=%CD%"'
     ('.\payload\{0} %*' -f $launcherName)
     'set "EXIT_CODE=%ERRORLEVEL%"'
     'popd >nul'
