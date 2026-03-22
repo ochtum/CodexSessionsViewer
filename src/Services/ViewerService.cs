@@ -42,15 +42,21 @@ public sealed partial class ViewerService
     private readonly LabelStore _labelStore;
     private readonly ViewerSettingsStore _viewerSettings;
     private readonly ModelCatalogService _modelCatalog;
+    private readonly ExchangeRateService _exchangeRates;
     private readonly ConcurrentDictionary<string, SessionCacheEntry> _cache = new(PathComparer);
     private IReadOnlyList<string>? _sessionRoots;
     private IReadOnlyList<string>? _wslDistroRoots;
 
-    public ViewerService(LabelStore labelStore, ViewerSettingsStore viewerSettings, ModelCatalogService modelCatalog)
+    public ViewerService(
+        LabelStore labelStore,
+        ViewerSettingsStore viewerSettings,
+        ModelCatalogService modelCatalog,
+        ExchangeRateService exchangeRates)
     {
         _labelStore = labelStore;
         _viewerSettings = viewerSettings;
         _modelCatalog = modelCatalog;
+        _exchangeRates = exchangeRates;
     }
 
     public IReadOnlyList<string> GetSessionRoots()
@@ -144,7 +150,7 @@ public sealed partial class ViewerService
         return _modelCatalog.GetStatus();
     }
 
-    public Task<CostSummaryResponse> GetCostSummaryAsync(CancellationToken cancellationToken = default)
+    public async Task<CostSummaryResponse> GetCostSummaryAsync(CancellationToken cancellationToken = default)
     {
         var timeZone = TimeZoneInfo.Local;
         var nowLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime;
@@ -152,6 +158,7 @@ public sealed partial class ViewerService
         var groupAccumulators = groupDefinitions
             .Select(definition => new CostSummaryGroupAccumulator(definition))
             .ToArray();
+        var exchangeRate = await _exchangeRates.GetUsdJpyRateAsync(cancellationToken);
 
         foreach (var path in EnumerateSessionFiles(GetSessionRoots()))
         {
@@ -170,6 +177,7 @@ public sealed partial class ViewerService
             var sessionUsage = new TokenUsageAccumulator();
             TokenUsageSnapshot? previousTotals = null;
             var currentModel = string.Empty;
+            var currentReasoningEffort = string.Empty;
             var rawLineCount = 0;
 
             try
@@ -202,6 +210,12 @@ public sealed partial class ViewerService
                                 currentModel = turnModel;
                             }
 
+                            var turnReasoningEffort = ExtractReasoningEffort(payload);
+                            if (!string.IsNullOrWhiteSpace(turnReasoningEffort))
+                            {
+                                currentReasoningEffort = turnReasoningEffort;
+                            }
+
                             continue;
                         }
 
@@ -215,6 +229,7 @@ public sealed partial class ViewerService
                             timestamp,
                             rawLineCount,
                             ref currentModel,
+                            ref currentReasoningEffort,
                             ref previousTotals);
                         if (usageEvent is null)
                         {
@@ -258,14 +273,15 @@ public sealed partial class ViewerService
             }
         }
 
-        return Task.FromResult(new CostSummaryResponse
+        return new CostSummaryResponse
         {
             GeneratedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
             TimeZoneId = timeZone.Id,
+            ExchangeRate = exchangeRate,
             Groups = groupAccumulators
                 .Select(group => group.ToDto())
                 .ToArray(),
-        });
+        };
     }
 
     public async Task<SessionListResponse> GetSessionsAsync(
@@ -353,6 +369,7 @@ public sealed partial class ViewerService
         var indexRecord = GetOrBuildIndexRecord(path);
         var sessionPath = indexRecord.Summary.Path;
         var sessionLabelIds = snapshot.SessionLabels.TryGetValue(sessionPath, out var sIds) ? sIds : Array.Empty<int>();
+        var exchangeRate = await _exchangeRates.GetUsdJpyRateAsync(cancellationToken);
 
         if (!includeEvents)
         {
@@ -362,6 +379,7 @@ public sealed partial class ViewerService
                     indexRecord.Summary,
                     sessionLabelIds,
                     ResolveLabels(sessionLabelIds, snapshot.LabelById)),
+                ExchangeRate = exchangeRate,
             };
         }
 
@@ -386,6 +404,7 @@ public sealed partial class ViewerService
                         snapshot.LabelById)))
                 .ToArray(),
             RawLineCount = eventsData.RawLineCount,
+            ExchangeRate = exchangeRate,
             Usage = eventsData.Usage,
         };
     }
@@ -491,6 +510,7 @@ public sealed partial class ViewerService
 
         TokenUsageSnapshot? previousTotals = null;
         var currentModel = string.Empty;
+        var currentReasoningEffort = string.Empty;
         var rawLineCount = 0;
 
         foreach (var line in File.ReadLines(path))
@@ -521,6 +541,12 @@ public sealed partial class ViewerService
                         currentModel = turnModel;
                     }
 
+                    var turnReasoningEffort = ExtractReasoningEffort(payload);
+                    if (!string.IsNullOrWhiteSpace(turnReasoningEffort))
+                    {
+                        currentReasoningEffort = turnReasoningEffort;
+                    }
+
                     continue;
                 }
 
@@ -533,6 +559,7 @@ public sealed partial class ViewerService
                         timestamp,
                         rawLineCount,
                         ref currentModel,
+                        ref currentReasoningEffort,
                         ref previousTotals);
                     if (usageEvent is null || !targetEventIds.Contains(eventId))
                     {
@@ -924,6 +951,7 @@ public sealed partial class ViewerService
             StartedAt = string.Empty,
             Cwd = string.Empty,
             Model = string.Empty,
+            ReasoningEffort = string.Empty,
             Source = "cli",
             FirstUserText = string.Empty,
             FirstRealUserText = string.Empty,
@@ -966,6 +994,9 @@ public sealed partial class ViewerService
                                 Model = GetString(payload, "model_provider"),
                                 Source = ClassifySource(GetString(payload, "source"), GetString(payload, "originator")),
                             };
+                            break;
+                        case "turn_context":
+                            summary = UpdateSummaryFromTurnContext(summary, payload);
                             break;
                         case "response_item":
                             searchLength = AppendResponseItemSearchText(payload, summary.Source, searchChunks, searchLength);
@@ -1015,6 +1046,7 @@ public sealed partial class ViewerService
         var usageAccumulator = new TokenUsageAccumulator();
         TokenUsageSnapshot? previousTotals = null;
         var currentModel = string.Empty;
+        var currentReasoningEffort = string.Empty;
         foreach (var line in File.ReadLines(path))
         {
             rawLineCount++;
@@ -1039,6 +1071,12 @@ public sealed partial class ViewerService
                     if (!string.IsNullOrWhiteSpace(turnModel))
                     {
                         currentModel = turnModel;
+                    }
+
+                    var turnReasoningEffort = ExtractReasoningEffort(payload);
+                    if (!string.IsNullOrWhiteSpace(turnReasoningEffort))
+                    {
+                        currentReasoningEffort = turnReasoningEffort;
                     }
                 }
                 else if (type == "response_item")
@@ -1111,6 +1149,7 @@ public sealed partial class ViewerService
                             timestamp,
                             rawLineCount,
                             ref currentModel,
+                            ref currentReasoningEffort,
                             ref previousTotals);
                         if (usageEvent is not null)
                         {
@@ -1136,12 +1175,19 @@ public sealed partial class ViewerService
         string timestamp,
         int rawLineCount,
         ref string currentModel,
+        ref string currentReasoningEffort,
         ref TokenUsageSnapshot? previousTotals)
     {
         var extractedModel = ExtractModelName(payload);
         if (!string.IsNullOrWhiteSpace(extractedModel))
         {
             currentModel = extractedModel;
+        }
+
+        var extractedReasoningEffort = ExtractReasoningEffort(payload);
+        if (!string.IsNullOrWhiteSpace(extractedReasoningEffort))
+        {
+            currentReasoningEffort = extractedReasoningEffort;
         }
 
         if (!payload.TryGetProperty("info", out var info) || info.ValueKind != JsonValueKind.Object)
@@ -1183,6 +1229,7 @@ public sealed partial class ViewerService
             Kind = "token_usage",
             Role = "system",
             Model = currentModel,
+            ReasoningEffort = currentReasoningEffort,
             InputTokens = normalized.InputTokens,
             CachedInputTokens = normalized.CachedInputTokens,
             OutputTokens = normalized.OutputTokens,
@@ -1202,6 +1249,25 @@ public sealed partial class ViewerService
             TryGetNestedString(payload, "info", "model_name"),
             TryGetNestedString(payload, "info", "metadata", "model"),
             TryGetNestedString(payload, "metadata", "model"),
+        })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ExtractReasoningEffort(JsonElement payload)
+    {
+        foreach (var candidate in new[]
+        {
+            GetString(payload, "effort"),
+            GetString(payload, "reasoning_effort"),
+            TryGetNestedString(payload, "collaboration_mode", "settings", "reasoning_effort"),
+            TryGetNestedString(payload, "collaboration_mode", "settings", "effort"),
         })
         {
             if (!string.IsNullOrWhiteSpace(candidate))
@@ -1345,6 +1411,17 @@ public sealed partial class ViewerService
         }
 
         return next;
+    }
+
+    private static SessionSummaryDto UpdateSummaryFromTurnContext(SessionSummaryDto summary, JsonElement payload)
+    {
+        var reasoningEffort = ExtractReasoningEffort(payload);
+        if (string.IsNullOrWhiteSpace(reasoningEffort))
+        {
+            return summary;
+        }
+
+        return summary with { ReasoningEffort = reasoningEffort };
     }
 
     private static int AppendResponseItemSearchText(JsonElement payload, string source, List<string> searchChunks, int currentLength)

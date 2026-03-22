@@ -31,6 +31,8 @@ public sealed record SessionSummaryDto
 
     public string Model { get; init; } = string.Empty;
 
+    public string ReasoningEffort { get; init; } = string.Empty;
+
     public string Source { get; init; } = string.Empty;
 
     public string FirstUserText { get; init; } = string.Empty;
@@ -67,6 +69,8 @@ public sealed class SessionEventDto
     public string Output { get; init; } = string.Empty;
 
     public string Model { get; init; } = string.Empty;
+
+    public string ReasoningEffort { get; init; } = string.Empty;
 
     public long InputTokens { get; init; }
 
@@ -123,6 +127,21 @@ public sealed class ModelCatalogStatusDto
     public string OpenAiModelsLastError { get; init; } = string.Empty;
 }
 
+public sealed class ExchangeRateDto
+{
+    public string BaseCurrency { get; init; } = string.Empty;
+
+    public decimal JpyRate { get; init; }
+
+    public decimal CnyRate { get; init; }
+
+    public decimal TwdRate { get; init; }
+
+    public decimal HkdRate { get; init; }
+
+    public string FetchedAt { get; init; } = string.Empty;
+}
+
 public sealed class CostSummaryPeriodDto
 {
     public string Key { get; init; } = string.Empty;
@@ -156,6 +175,8 @@ public sealed class CostSummaryResponse
     public string GeneratedAt { get; init; } = string.Empty;
 
     public string TimeZoneId { get; init; } = string.Empty;
+
+    public ExchangeRateDto? ExchangeRate { get; init; }
 
     public IReadOnlyList<CostSummaryGroupDto> Groups { get; init; } = [];
 }
@@ -220,6 +241,8 @@ public sealed class SessionDetailResponse
     public IReadOnlyList<SessionEventDto> Events { get; init; } = [];
 
     public int RawLineCount { get; init; }
+
+    public ExchangeRateDto? ExchangeRate { get; init; }
 
     public TokenUsageSummaryDto? Usage { get; init; }
 }

@@ -1,9 +1,12 @@
 (() => {
 const LANGUAGE_STORAGE_KEY = 'codex_sessions_viewer_language_v1';
+const COST_CURRENCY_STORAGE_KEY = 'codex_sessions_viewer_cost_currency_v1';
 const SUPPORTED_LANGUAGES = ['ja', 'en', 'zh-Hans', 'zh-Hant'];
+const SUPPORTED_COST_CURRENCIES = ['USD', 'JPY', 'CNY', 'TWD', 'HKD'];
 const COST_I18N = {
   ja: {
     'language.selector': '言語',
+    'currency.selector': '通貨',
     'page.title': 'コスト表示 | Codex Sessions Viewer',
     'page.badge': 'Codex Sessions Viewer',
     'page.heroTitle': 'コスト表示',
@@ -11,6 +14,7 @@ const COST_I18N = {
     'page.refresh': 'Refresh',
     'meta.generatedAt': '更新日時',
     'meta.timeZone': 'タイムゾーン',
+    'meta.fxRate': '為替',
     'status.loading': 'コスト集計を読み込み中...',
     'status.error': 'コスト集計の取得に失敗しました。',
     'group.month': '月別',
@@ -43,6 +47,7 @@ const COST_I18N = {
   },
   en: {
     'language.selector': 'Language',
+    'currency.selector': 'Currency',
     'page.title': 'Cost Summary | Codex Sessions Viewer',
     'page.badge': 'Codex Sessions Viewer',
     'page.heroTitle': 'Cost Summary',
@@ -50,6 +55,7 @@ const COST_I18N = {
     'page.refresh': 'Refresh',
     'meta.generatedAt': 'Updated',
     'meta.timeZone': 'Time zone',
+    'meta.fxRate': 'FX',
     'status.loading': 'Loading cost summary...',
     'status.error': 'Failed to load the cost summary.',
     'group.month': 'Monthly',
@@ -82,6 +88,7 @@ const COST_I18N = {
   },
   'zh-Hans': {
     'language.selector': '语言',
+    'currency.selector': '货币',
     'page.title': '成本汇总 | Codex Sessions Viewer',
     'page.badge': 'Codex Sessions Viewer',
     'page.heroTitle': '成本汇总',
@@ -89,6 +96,7 @@ const COST_I18N = {
     'page.refresh': 'Refresh',
     'meta.generatedAt': '更新时间',
     'meta.timeZone': '时区',
+    'meta.fxRate': '汇率',
     'status.loading': '正在加载成本汇总...',
     'status.error': '获取成本汇总失败。',
     'group.month': '按月',
@@ -123,11 +131,13 @@ const COST_I18N = {
 COST_I18N['zh-Hant'] = {
   ...COST_I18N['zh-Hans'],
   'language.selector': '語言',
+  'currency.selector': '幣別',
   'page.title': '成本彙總 | Codex Sessions Viewer',
   'page.heroTitle': '成本彙總',
   'page.heroCopy': '可按月、週、日查看 usage 彙總，並比較「按工作階段」與「按 token usage 事件」兩種視角。',
   'meta.generatedAt': '更新時間',
   'meta.timeZone': '時區',
+  'meta.fxRate': '匯率',
   'status.loading': '正在載入成本彙總...',
   'status.error': '取得成本彙總失敗。',
   'group.month': '按月',
@@ -150,6 +160,7 @@ COST_I18N['zh-Hant'] = {
 };
 
 let uiLanguage = 'ja';
+let selectedCostCurrency = 'USD';
 let costSummaryData = null;
 let isLoading = false;
 
@@ -162,6 +173,25 @@ function normalizeLanguage(value){
     return 'zh-Hant';
   }
   return SUPPORTED_LANGUAGES.includes(raw) ? raw : 'ja';
+}
+
+function normalizeCostCurrency(value){
+  const raw = (value || '').trim().toUpperCase();
+  return SUPPORTED_COST_CURRENCIES.includes(raw) ? raw : '';
+}
+
+function getDefaultCostCurrencyForLanguage(language){
+  const normalized = normalizeLanguage(language);
+  if(normalized === 'ja'){
+    return 'JPY';
+  }
+  if(normalized === 'zh-Hans'){
+    return 'CNY';
+  }
+  if(normalized === 'zh-Hant'){
+    return 'TWD';
+  }
+  return 'USD';
 }
 
 function t(key){
@@ -217,12 +247,128 @@ function formatUsd(value){
   }).format(numeric);
 }
 
+function formatJpy(value){
+  const numeric = Number(value);
+  if(!Number.isFinite(numeric)){
+    return '';
+  }
+  const digits = numeric >= 100 ? 0 : (numeric >= 10 ? 1 : (numeric >= 1 ? 2 : 3));
+  return new Intl.NumberFormat(getUiLocale(), {
+    style: 'currency',
+    currency: 'JPY',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(numeric);
+}
+
+function formatCny(value){
+  const numeric = Number(value);
+  if(!Number.isFinite(numeric)){
+    return '';
+  }
+  const digits = numeric >= 10 ? 2 : (numeric >= 1 ? 3 : 4);
+  return new Intl.NumberFormat(getUiLocale(), {
+    style: 'currency',
+    currency: 'CNY',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(numeric);
+}
+
+function formatLocalCurrency(value, currencyCode){
+  const numeric = Number(value);
+  if(!Number.isFinite(numeric) || !currencyCode || currencyCode === 'USD'){
+    return '';
+  }
+  if(currencyCode === 'JPY'){
+    return formatJpy(numeric);
+  }
+  if(currencyCode === 'CNY'){
+    return formatCny(numeric);
+  }
+  const digits = numeric >= 10 ? 2 : (numeric >= 1 ? 3 : 4);
+  return new Intl.NumberFormat(getUiLocale(), {
+    style: 'currency',
+    currency: currencyCode,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(numeric);
+}
+
+function getPreferredCostCurrencyCode(){
+  return normalizeCostCurrency(selectedCostCurrency) || 'USD';
+}
+
+function getExchangeRateValue(exchangeRate, currencyCode){
+  if(!exchangeRate || currencyCode === 'USD'){
+    return null;
+  }
+  const rate = currencyCode === 'JPY'
+    ? Number(exchangeRate.jpy_rate)
+    : currencyCode === 'CNY'
+      ? Number(exchangeRate.cny_rate)
+      : currencyCode === 'TWD'
+        ? Number(exchangeRate.twd_rate)
+        : currencyCode === 'HKD'
+          ? Number(exchangeRate.hkd_rate)
+      : NaN;
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
+function convertUsdToLocalCurrency(value, exchangeRate, currencyCode){
+  const usd = Number(value);
+  const rate = getExchangeRateValue(exchangeRate, currencyCode);
+  if(!Number.isFinite(usd) || !Number.isFinite(rate) || rate <= 0){
+    return null;
+  }
+  return usd * rate;
+}
+
+function formatCostDisplay(value, exchangeRate){
+  if(!(typeof value === 'number' && Number.isFinite(value))){
+    return t('usage.costUnknown');
+  }
+  const currencyCode = getPreferredCostCurrencyCode();
+  if(currencyCode === 'USD'){
+    return formatUsd(value);
+  }
+  const localValue = convertUsdToLocalCurrency(value, exchangeRate, currencyCode);
+  if(localValue == null){
+    return formatUsd(value);
+  }
+  const formattedLocal = formatLocalCurrency(localValue, currencyCode);
+  if(!formattedLocal){
+    return formatUsd(value);
+  }
+  return `${formatUsd(value)} / ${formattedLocal}`;
+}
+
+function formatExchangeRateDisplay(exchangeRate){
+  const currencyCode = getPreferredCostCurrencyCode();
+  if(!exchangeRate || currencyCode === 'USD'){
+    return '';
+  }
+  const rate = getExchangeRateValue(exchangeRate, currencyCode);
+  if(!Number.isFinite(rate) || rate <= 0){
+    return '';
+  }
+  const pair = `${exchangeRate.base_currency || 'USD'}/${currencyCode}`;
+  const formattedRate = new Intl.NumberFormat(getUiLocale(), {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(rate);
+  const fetchedAt = exchangeRate.fetched_at ? formatTimestamp(exchangeRate.fetched_at) : '';
+  return fetchedAt
+    ? `${pair} ${formattedRate} @ ${fetchedAt}`
+    : `${pair} ${formattedRate}`;
+}
+
 function formatPeriodCostDisplay(period){
   if(!period || Number(period.item_count || 0) === 0){
     return '-';
   }
   return typeof period.cost_usd === 'number' && Number.isFinite(period.cost_usd)
-    ? formatUsd(period.cost_usd)
+    ? formatCostDisplay(period.cost_usd, costSummaryData && costSummaryData.exchange_rate)
     : t('usage.costUnknown');
 }
 
@@ -307,6 +453,9 @@ function renderMeta(){
   meta.innerHTML = [
     `<div class="costs-meta-item"><span class="costs-meta-label">${esc(t('meta.generatedAt'))}</span><span>${esc(formatTimestamp(costSummaryData.generated_at))}</span></div>`,
     `<div class="costs-meta-item"><span class="costs-meta-label">${esc(t('meta.timeZone'))}</span><span>${esc(costSummaryData.time_zone_id || '-')}</span></div>`,
+    costSummaryData.exchange_rate
+      ? `<div class="costs-meta-item"><span class="costs-meta-label">${esc(t('meta.fxRate'))}</span><span>${esc(formatExchangeRateDisplay(costSummaryData.exchange_rate))}</span></div>`
+      : '',
   ].join('');
 }
 
@@ -386,6 +535,11 @@ function applyLanguage(){
     languageSelect.value = uiLanguage;
     languageSelect.setAttribute('aria-label', t('language.selector'));
   }
+  const currencySelect = document.getElementById('currency_select');
+  if(currencySelect){
+    currencySelect.value = getPreferredCostCurrencyCode();
+    currencySelect.setAttribute('aria-label', t('currency.selector'));
+  }
   const refresh = document.getElementById('refresh_costs');
   if(refresh){
     refresh.textContent = t('page.refresh');
@@ -435,10 +589,30 @@ async function loadCostSummary(){
 
 function loadInitialLanguage(){
   const params = new URLSearchParams(window.location.search);
-  const fromQuery = normalizeLanguage(params.get('lang'));
-  const stored = normalizeLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY));
-  uiLanguage = fromQuery || stored || normalizeLanguage(navigator.language);
+  const queryValue = params.get('lang') || '';
+  const storedValue = localStorage.getItem(LANGUAGE_STORAGE_KEY) || '';
+  const fromQuery = queryValue ? normalizeLanguage(queryValue) : '';
+  const stored = storedValue ? normalizeLanguage(storedValue) : '';
+  uiLanguage = fromQuery || stored || normalizeLanguage(navigator.language) || 'ja';
   localStorage.setItem(LANGUAGE_STORAGE_KEY, uiLanguage);
+}
+
+function loadInitialCostCurrency(){
+  const params = new URLSearchParams(window.location.search);
+  const queryValue = params.get('currency') || '';
+  const storedValue = localStorage.getItem(COST_CURRENCY_STORAGE_KEY) || '';
+  const fromQuery = queryValue ? normalizeCostCurrency(queryValue) : '';
+  const stored = storedValue ? normalizeCostCurrency(storedValue) : '';
+  selectedCostCurrency = fromQuery || stored || getDefaultCostCurrencyForLanguage(uiLanguage);
+  localStorage.setItem(COST_CURRENCY_STORAGE_KEY, selectedCostCurrency);
+}
+
+function setCostCurrency(nextCurrency, persist){
+  selectedCostCurrency = normalizeCostCurrency(nextCurrency) || getDefaultCostCurrencyForLanguage(uiLanguage);
+  if(persist !== false){
+    localStorage.setItem(COST_CURRENCY_STORAGE_KEY, selectedCostCurrency);
+  }
+  applyLanguage();
 }
 
 function initCostsPage(){
@@ -448,6 +622,7 @@ function initCostsPage(){
 
   window.__codexCostsPageInitialized = true;
   loadInitialLanguage();
+  loadInitialCostCurrency();
   applyLanguage();
 
   const languageSelect = document.getElementById('language_select');
@@ -459,12 +634,36 @@ function initCostsPage(){
     });
   }
 
+  const currencySelect = document.getElementById('currency_select');
+  if(currencySelect){
+    currencySelect.addEventListener('change', event => {
+      setCostCurrency(event.target.value);
+    });
+  }
+
   const refresh = document.getElementById('refresh_costs');
   if(refresh){
     refresh.addEventListener('click', () => {
       void loadCostSummary();
     });
   }
+
+  window.addEventListener('storage', (event) => {
+    if(event.key === LANGUAGE_STORAGE_KEY){
+      const nextLanguage = normalizeLanguage(event.newValue || 'ja');
+      if(nextLanguage !== uiLanguage){
+        uiLanguage = nextLanguage;
+        applyLanguage();
+      }
+      return;
+    }
+    if(event.key === COST_CURRENCY_STORAGE_KEY){
+      const nextCurrency = normalizeCostCurrency(event.newValue || '') || getDefaultCostCurrencyForLanguage(uiLanguage);
+      if(nextCurrency !== getPreferredCostCurrencyCode()){
+        setCostCurrency(nextCurrency, false);
+      }
+    }
+  });
 
   void loadCostSummary();
 }
