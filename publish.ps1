@@ -17,6 +17,8 @@ $appName = [System.IO.Path]::GetFileNameWithoutExtension($projectPath)
 $launcherName = if ($Runtime -like "win-*") { "$appName.exe" } else { $appName }
 $launcherPath = Join-Path $payloadDir $launcherName
 $runCmdPath = Join-Path $outputDir "run.cmd"
+$consoleWindowTitle = "CodexSessionsViewer"
+$consoleWindowTitle = "CodexSessionsViewer"
 
 if (-not (Test-Path $projectPath)) {
     throw "Project file not found: $projectPath"
@@ -83,7 +85,7 @@ if (-not (Test-Path $launcherPath)) {
 @(
     '@echo off'
     'setlocal'
-    'title CodexSessionsViewer'
+    ('title {0}' -f $consoleWindowTitle)
     'pushd "%~dp0" >nul'
     ('.\payload\{0} %*' -f $launcherName)
     'set "EXIT_CODE=%ERRORLEVEL%"'
