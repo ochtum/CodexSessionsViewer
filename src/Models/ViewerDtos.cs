@@ -35,6 +35,8 @@ public sealed record SessionSummaryDto
 
     public string Source { get; init; } = string.Empty;
 
+    public bool IsSubagent { get; init; }
+
     public string FirstUserText { get; init; } = string.Empty;
 
     public string FirstRealUserText { get; init; } = string.Empty;

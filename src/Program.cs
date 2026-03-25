@@ -231,6 +231,15 @@ public class Program
             return Results.Ok(response);
         });
 
+        app.MapGet("/api/sessions-lite", async (HttpRequest request, ViewerService viewer, CancellationToken cancellationToken) =>
+        {
+            var query = request.Query;
+            var response = await viewer.GetSessionsLiteAsync(
+                query["sort"],
+                cancellationToken);
+            return Results.Ok(response);
+        });
+
         app.MapGet("/api/session", async (HttpRequest request, ViewerService viewer, CancellationToken cancellationToken) =>
         {
             try

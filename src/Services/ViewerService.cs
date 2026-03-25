@@ -11,7 +11,9 @@ namespace CodexSessionsViewer.Services;
 public sealed partial class ViewerService
 {
     private const int SearchTextLimit = 50_000;
-    private const int MaxCacheEntries = 500;
+    // Keep enough index/event cache entries for large session sets to avoid frequent rebuild churn.
+    private const int MaxCacheEntries = 2000;
+    private static readonly TimeSpan SessionFilesCacheTtl = TimeSpan.FromSeconds(8);
     private static readonly string DefaultSessionsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".codex",
@@ -44,8 +46,10 @@ public sealed partial class ViewerService
     private readonly ModelCatalogService _modelCatalog;
     private readonly ExchangeRateService _exchangeRates;
     private readonly ConcurrentDictionary<string, SessionCacheEntry> _cache = new(PathComparer);
+    private readonly object _sessionFilesCacheLock = new();
     private IReadOnlyList<string>? _sessionRoots;
     private IReadOnlyList<string>? _wslDistroRoots;
+    private SessionFilesCacheEntry? _sessionFilesCache;
 
     public ViewerService(
         LabelStore labelStore,
@@ -335,6 +339,56 @@ public sealed partial class ViewerService
             }
 
             sessions.Add(WithSessionLabelIds(record.Summary, sessionLabelIds));
+        }
+
+        IOrderedEnumerable<SessionSummaryDto> ordered = normalizedSort switch
+        {
+            "asc" => sessions
+                .OrderBy(GetSessionSortKey, StringComparer.Ordinal)
+                .ThenBy(session => session.Mtime, StringComparer.Ordinal),
+            "updated" => sessions
+                .OrderByDescending(session => session.Mtime, StringComparer.Ordinal)
+                .ThenByDescending(GetSessionSortKey, StringComparer.Ordinal),
+            _ => sessions
+                .OrderByDescending(GetSessionSortKey, StringComparer.Ordinal)
+                .ThenByDescending(session => session.Mtime, StringComparer.Ordinal),
+        };
+
+        return new SessionListResponse
+        {
+            Root = string.Join(" | ", roots),
+            Sessions = ordered.Take(settings.SessionListMax).ToArray(),
+        };
+    }
+
+    public async Task<SessionListResponse> GetSessionsLiteAsync(
+        string? sort,
+        CancellationToken cancellationToken = default)
+    {
+        var roots = GetSessionRoots();
+        var settings = _viewerSettings.GetSnapshot();
+        var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
+        var normalizedSort = sort is "asc" or "updated" ? sort : "desc";
+
+        var sessions = new List<SessionSummaryDto>();
+        foreach (var path in EnumerateSessionFiles(roots))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            SessionSummaryDto summary;
+            try
+            {
+                summary = TryGetCachedSummary(path) ?? BuildLiteSummary(path);
+            }
+            catch (FileNotFoundException)
+            {
+                continue;
+            }
+
+            var sessionLabelIds = snapshot.SessionLabels.TryGetValue(summary.Path, out var labelIds)
+                ? labelIds
+                : Array.Empty<int>();
+            sessions.Add(WithSessionLabelIds(summary, sessionLabelIds));
         }
 
         IOrderedEnumerable<SessionSummaryDto> ordered = normalizedSort switch
@@ -939,6 +993,94 @@ public sealed partial class ViewerService
         }
     }
 
+    private SessionSummaryDto? TryGetCachedSummary(string path)
+    {
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
+        {
+            _cache.TryRemove(path, out _);
+            throw new FileNotFoundException("session file not found", path);
+        }
+
+        var signature = GetSignature(fileInfo);
+        if (_cache.TryGetValue(path, out var cached)
+            && cached.Signature == signature
+            && cached.IndexRecord is not null)
+        {
+            cached.LastAccessedTicks = Environment.TickCount64;
+            return cached.IndexRecord.Summary;
+        }
+
+        return null;
+    }
+
+    private SessionSummaryDto BuildLiteSummary(string path)
+    {
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
+        {
+            throw new FileNotFoundException("session file not found", path);
+        }
+
+        var summary = new SessionSummaryDto
+        {
+            Id = System.IO.Path.GetFileNameWithoutExtension(path),
+            Path = CanonicalizePath(path),
+            RelativePath = ToRelativePath(path),
+            Mtime = fileInfo.LastWriteTime.ToString("s"),
+            SessionId = string.Empty,
+            StartedAt = string.Empty,
+            Cwd = string.Empty,
+            Model = string.Empty,
+            ReasoningEffort = string.Empty,
+            Source = "cli",
+            IsSubagent = false,
+            FirstUserText = string.Empty,
+            FirstRealUserText = string.Empty,
+            MinEventTs = string.Empty,
+            MaxEventTs = string.Empty,
+        };
+
+        try
+        {
+            foreach (var line in File.ReadLines(path).Take(8))
+            {
+                if (!TryParseJson(line, out var root))
+                {
+                    continue;
+                }
+
+                using (root)
+                {
+                    var element = root.RootElement;
+                    if (GetString(element, "type") != "session_meta" || !element.TryGetProperty("payload", out var payload))
+                    {
+                        continue;
+                    }
+
+                    var rawSource = GetString(payload, "source");
+                    var originator = GetString(payload, "originator");
+                    summary = summary with
+                    {
+                        SessionId = GetString(payload, "id"),
+                        StartedAt = GetString(payload, "timestamp"),
+                        Cwd = GetString(payload, "cwd"),
+                        Model = GetString(payload, "model_provider"),
+                        Source = ClassifySource(rawSource, originator),
+                        IsSubagent = IsSubagentSource(rawSource, originator),
+                    };
+                    break;
+                }
+            }
+        }
+        catch
+        {
+            // Keep partial summary if the file is unreadable.
+        }
+
+        return summary;
+    }
+
     private IndexRecord BuildIndexRecord(string path, FileInfo fileInfo)
     {
         var summary = new SessionSummaryDto
@@ -953,6 +1095,7 @@ public sealed partial class ViewerService
             Model = string.Empty,
             ReasoningEffort = string.Empty,
             Source = "cli",
+            IsSubagent = false,
             FirstUserText = string.Empty,
             FirstRealUserText = string.Empty,
             MinEventTs = string.Empty,
@@ -993,6 +1136,7 @@ public sealed partial class ViewerService
                                 Cwd = GetString(payload, "cwd"),
                                 Model = GetString(payload, "model_provider"),
                                 Source = ClassifySource(GetString(payload, "source"), GetString(payload, "originator")),
+                                IsSubagent = IsSubagentSource(GetString(payload, "source"), GetString(payload, "originator")),
                             };
                             break;
                         case "turn_context":
@@ -1481,6 +1625,25 @@ public sealed partial class ViewerService
 
     private IEnumerable<string> EnumerateSessionFiles(IEnumerable<string> roots)
     {
+        var normalizedRoots = roots
+            .Where(root => !string.IsNullOrWhiteSpace(root))
+            .Select(CanonicalizePath)
+            .Distinct(PathComparer)
+            .OrderBy(root => root, PathComparer)
+            .ToArray();
+        var cacheKey = string.Join("|", normalizedRoots);
+        var now = DateTime.UtcNow;
+
+        lock (_sessionFilesCacheLock)
+        {
+            if (_sessionFilesCache is not null
+                && _sessionFilesCache.RootsKey == cacheKey
+                && now - _sessionFilesCache.BuiltAtUtc <= SessionFilesCacheTtl)
+            {
+                return _sessionFilesCache.Paths;
+            }
+        }
+
         var files = new Dictionary<string, FileInfo>(PathComparer);
         var options = new EnumerationOptions
         {
@@ -1488,7 +1651,7 @@ public sealed partial class ViewerService
             IgnoreInaccessible = true,
             ReturnSpecialDirectories = false,
         };
-        foreach (var root in roots)
+        foreach (var root in normalizedRoots)
         {
             if (!Directory.Exists(root))
             {
@@ -1505,11 +1668,23 @@ public sealed partial class ViewerService
             }
         }
 
-        return files.Values
+        var result = files.Values
             .OrderByDescending(file => file.LastWriteTimeUtc)
             .ThenBy(file => file.FullName, PathComparer)
             .Select(file => file.FullName)
             .ToArray();
+
+        lock (_sessionFilesCacheLock)
+        {
+            _sessionFilesCache = new SessionFilesCacheEntry
+            {
+                RootsKey = cacheKey,
+                BuiltAtUtc = now,
+                Paths = result,
+            };
+        }
+
+        return result;
     }
 
     private string ToRelativePath(string path)
@@ -1984,6 +2159,24 @@ public sealed partial class ViewerService
         return "cli";
     }
 
+    private static bool IsSubagentSource(string rawSource, string originator)
+    {
+        var source = rawSource.Trim().ToLowerInvariant();
+        var origin = originator.Trim().ToLowerInvariant();
+        if (source is "exec" or "codex_exec")
+        {
+            return true;
+        }
+
+        if (origin is "exec" or "codex_exec")
+        {
+            return true;
+        }
+
+        return source.Contains("exec", StringComparison.Ordinal)
+            || origin.Contains("exec", StringComparison.Ordinal);
+    }
+
     private static string ClassifyUserMessage(string text)
     {
         var lower = text.ToLowerInvariant();
@@ -2110,6 +2303,15 @@ public sealed partial class ViewerService
             get => Volatile.Read(ref _lastAccessedTicks);
             set => Volatile.Write(ref _lastAccessedTicks, value);
         }
+    }
+
+    private sealed class SessionFilesCacheEntry
+    {
+        public string RootsKey { get; init; } = string.Empty;
+
+        public DateTime BuiltAtUtc { get; init; }
+
+        public IReadOnlyList<string> Paths { get; init; } = Array.Empty<string>();
     }
 
     private sealed record IndexRecord(SessionSummaryDto Summary, string SearchText);

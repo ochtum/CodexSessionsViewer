@@ -637,13 +637,17 @@ const I18N = {
     'common.date': '日付',
     'common.time': '時間',
     'filter.source': 'source',
+    'filter.subagents': 'subagents',
     'filter.sessionLabel': 'セッションラベル',
     'filter.eventLabel': 'イベントラベル',
     'filter.source.all': 'source: all',
     'filter.source.cli': 'source: CLI',
     'filter.source.vscode': 'source: VS Code',
+    'filter.subagents.all': '含む',
+    'filter.subagents.exclude': '含まない',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'session.badge.subagents': 'subagents',
     'filter.sort': '並び順',
     'filter.sort.desc': '新しい順',
     'filter.sort.asc': '古い順',
@@ -857,13 +861,17 @@ const I18N = {
     'common.date': 'Date',
     'common.time': 'Time',
     'filter.source': 'Source',
+    'filter.subagents': 'Subagents',
     'filter.sessionLabel': 'Session label',
     'filter.eventLabel': 'Event label',
     'filter.source.all': 'source: all',
     'filter.source.cli': 'source: CLI',
     'filter.source.vscode': 'source: VS Code',
+    'filter.subagents.all': 'Include',
+    'filter.subagents.exclude': 'Exclude',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'session.badge.subagents': 'subagents',
     'filter.sort': 'Sort order',
     'filter.sort.desc': 'Newest first',
     'filter.sort.asc': 'Oldest first',
@@ -1077,13 +1085,17 @@ const I18N = {
     'common.date': '日期',
     'common.time': '时间',
     'filter.source': '来源',
+    'filter.subagents': 'Subagents',
     'filter.sessionLabel': '会话标签',
     'filter.eventLabel': '事件标签',
     'filter.source.all': 'source: all',
     'filter.source.cli': 'source: CLI',
     'filter.source.vscode': 'source: VS Code',
+    'filter.subagents.all': '包含',
+    'filter.subagents.exclude': '不包含',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'session.badge.subagents': 'subagents',
     'filter.sort': '排序',
     'filter.sort.desc': '最新优先',
     'filter.sort.asc': '最旧优先',
@@ -1287,7 +1299,11 @@ I18N['zh-Hant'] = {
   'common.date': '日期',
   'common.time': '時間',
   'filter.source': '來源',
+  'filter.subagents': 'Subagents',
   'filter.eventLabel': '事件標籤',
+  'filter.subagents.all': '包含',
+  'filter.subagents.exclude': '不包含',
+  'session.badge.subagents': 'subagents',
   'filter.sort': '排序',
   'filter.sort.desc': '最新優先',
   'filter.sort.asc': '最舊優先',
@@ -1583,6 +1599,7 @@ function applyMainLanguage(){
   setDateTimePairAria('event_date_from_date', 'event_date_from_time', t('filter.eventDateFrom'));
   setDateTimePairAria('event_date_to_date', 'event_date_to_time', t('filter.eventDateTo'));
   setFieldLabel('source_filter', t('filter.source'));
+  setFieldLabel('subagents_filter', t('filter.subagents'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
   document.querySelectorAll('.sort-tab').forEach(tab => {
@@ -1597,6 +1614,8 @@ function applyMainLanguage(){
   setOptionText('source_filter', 0, t('filter.source.all'));
   setOptionText('source_filter', 1, t('filter.source.cli'));
   setOptionText('source_filter', 2, t('filter.source.vscode'));
+  setOptionText('subagents_filter', 0, t('filter.subagents.all'));
+  setOptionText('subagents_filter', 1, t('filter.subagents.exclude'));
   setText('.detail-toolbar-row.primary .detail-group-title', t('detail.display'));
   setToggleLabel('only_user_instruction', t('detail.toggle.user'));
   setToggleLabel('only_ai_response', t('detail.toggle.ai'));
@@ -2705,6 +2724,38 @@ function normalizeSourceFilter(source){
   return normalizeSource(raw);
 }
 
+function normalizeSubagentsFilter(value){
+  const raw = (value || '').toLowerCase();
+  return raw === 'exclude' ? 'exclude' : 'include';
+}
+
+function hasSubagentsLabel(session){
+  if(session && session.is_subagent === true){
+    return true;
+  }
+  const candidates = [
+    session && session.path ? String(session.path) : '',
+    session && session.relative_path ? String(session.relative_path) : '',
+  ];
+  if(candidates.some(value => {
+    const normalized = String(value || '').toLowerCase();
+    return normalized.includes('/subagents/')
+      || normalized.includes('\\subagents\\')
+      || normalized.includes('/subagents\\')
+      || normalized.includes('\\subagents/');
+  })){
+    return true;
+  }
+  const source = String(session && session.source ? session.source : '').toLowerCase();
+  return source.includes('exec');
+}
+
+function renderSubagentsTag(session){
+  if(!hasSubagentsLabel(session)){
+    return '';
+  }
+  return '<div class="session-badge session-tag-subagents">' + esc(t('session.badge.subagents')) + '</div>';
+}
 function fmt(ts){
   if(!ts) return '';
   const d = new Date(ts);
@@ -4314,6 +4365,7 @@ function hasListFilter(){
     document.getElementById('event_date_to_time').value ||
     document.getElementById('q').value.trim() ||
     normalizeSourceFilter(document.getElementById('source_filter').value || 'all') !== 'all' ||
+    normalizeSubagentsFilter(document.getElementById('subagents_filter')?.value || 'include') !== 'include' ||
     getSelectedSessionLabelFilter() ||
     getSelectedListEventLabelFilter()
   );
@@ -4363,6 +4415,34 @@ function setActiveSortOrder(value){
   });
 }
 
+function shouldUseLiteSessionPreview(loadMode, q, sessionLabelId, eventLabelId){
+  return loadMode === 'initial' && !q && !sessionLabelId && !eventLabelId;
+}
+
+async function tryLoadLiteSessionPreview(requestId, sortOrder){
+  const liteParams = new URLSearchParams();
+  liteParams.set('ts', Date.now().toString());
+  if(sortOrder && sortOrder !== 'desc'){
+    liteParams.set('sort', sortOrder);
+  }
+  try {
+    const r = await fetch('/api/sessions-lite?' + liteParams.toString(), { cache: 'no-store' });
+    const data = await r.json();
+    if(requestId !== loadSessionsRequestSeq){
+      return;
+    }
+    const liteSessions = Array.isArray(data.sessions) ? data.sessions : [];
+    if(liteSessions.length === 0){
+      return;
+    }
+    state.sessions = liteSessions;
+    state.sessionRoot = data.root || state.sessionRoot;
+    applyFilter();
+  } catch (error) {
+    // Ignore lite preview errors and continue with the full load.
+  }
+}
+
 async function loadSessions(options){
   saveFilters();
   const requestId = ++loadSessionsRequestSeq;
@@ -4389,6 +4469,9 @@ async function loadSessions(options){
   const sortOrder = getActiveSortOrder();
   if(sortOrder && sortOrder !== 'desc'){
     params.set('sort', sortOrder);
+  }
+  if(shouldUseLiteSessionPreview(loadMode, q, sessionLabelId, eventLabelId)){
+    await tryLoadLiteSessionPreview(requestId, sortOrder);
   }
   try {
     const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
@@ -4514,6 +4597,7 @@ function saveFilters(){
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
+    subagents_filter: normalizeSubagentsFilter(document.getElementById('subagents_filter')?.value || 'include'),
     sort_order: getActiveSortOrder(),
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
@@ -4559,6 +4643,7 @@ function restoreFilters(){
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
     document.getElementById('source_filter').value = source;
+    document.getElementById('subagents_filter').value = normalizeSubagentsFilter(data.subagents_filter || 'include');
     if(data.sort_order === 'asc' || data.sort_order === 'desc' || data.sort_order === 'updated') setActiveSortOrder(data.sort_order);
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
@@ -4592,6 +4677,7 @@ function clearFilters(){
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
+  document.getElementById('subagents_filter').value = 'include';
   setActiveSortOrder('desc');
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
@@ -4627,9 +4713,11 @@ function applyFilter(){
   );
   const evFromTs = parseOptionalDatetimeStart(evFromRaw);
   const evToTs = parseOptionalDatetimeEnd(evToRaw);
+  const subagentsFilter = normalizeSubagentsFilter(document.getElementById('subagents_filter')?.value || 'include');
   state.filtered = state.sessions.filter(s => {
     const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
     const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
+    const subagentsMatched = subagentsFilter === 'exclude' ? !hasSubagentsLabel(s) : true;
 
     let dateMatched = true;
     if(fromTs !== null || toTs !== null){
@@ -4662,7 +4750,7 @@ function applyFilter(){
       }
     }
 
-    return cwdMatched && sourceMatched && dateMatched && eventDateMatched;
+    return cwdMatched && sourceMatched && subagentsMatched && dateMatched && eventDateMatched;
   });
   saveFilters();
   renderSessionList();
@@ -4680,6 +4768,7 @@ function renderSessionCard(session, options){
         <div class="session-meta-row session-meta-row-primary">
           <div class="session-badge session-time">${esc(fmt(session.started_at || session.mtime))}</div>
           <div class="session-badge session-source source-${esc(normalizeSource(session.source))}">${esc(sourceLabel(session.source))}</div>
+          ${renderSubagentsTag(session)}
         </div>
         <div class="session-preview">${esc(session.first_real_user_text || session.first_user_text || t('session.preview.empty'))}</div>
         ${(session.session_label_ids || session.session_labels || []).length ? `<div class="session-label-row">${renderAssignedLabels(session.session_labels && session.session_labels.length ? session.session_labels : resolveLabelsById(session.session_label_ids))}</div>` : ''}
@@ -4713,6 +4802,7 @@ function renderLabeledSessionCard(session){
         <span class="labeled-item-badge type-session">${esc(t('labelsPane.item.session'))}</span>
         <div class="session-badge session-time">${esc(fmt(session.started_at || session.mtime))}</div>
         <div class="session-badge session-source source-${esc(normalizeSource(session.source))}">${esc(sourceLabel(session.source))}</div>
+        ${renderSubagentsTag(session)}
       </div>
       <div class="labeled-item-row">
         <div class="session-badge session-cwd">${esc(session.cwd || '-')}</div>
@@ -5686,6 +5776,7 @@ function initViewerPage(){
   safeBindById('q', 'input', scheduleLoadSessions);
   safeBindById('mode', 'change', scheduleLoadSessions);
   safeBindById('source_filter', 'change', applyFilter);
+  safeBindById('subagents_filter', 'change', applyFilter);
   document.querySelectorAll('.sort-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       setActiveSortOrder(tab.dataset.sort);

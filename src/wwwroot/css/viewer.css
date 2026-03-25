@@ -1686,6 +1686,12 @@ button:disabled {
   background: #e7f1ff;
   border-color: #bdd9f7;
 }
+.session-tag-subagents {
+  color: #6b21a8;
+  background: #f3e8ff;
+  border-color: #d8b4fe;
+  font-weight: 700;
+}
 .detail-toolbar {
   gap: 0;
   padding: 4px 16px 6px;
