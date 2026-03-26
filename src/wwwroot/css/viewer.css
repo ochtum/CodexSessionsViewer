@@ -1448,7 +1448,9 @@ button:disabled {
 .session-item {
   padding: 10px 12px;
   min-width: 0;
-  border: 1px solid var(--line);
+  border-style: solid;
+  border-color: var(--line);
+  border-width: 1px 1px 1px 3px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.88);
   cursor: pointer;
@@ -1466,7 +1468,7 @@ button:disabled {
 }
 .session-item.active {
   border-color: rgba(15, 118, 110, 0.45);
-  border-left: 3px solid var(--accent);
+  border-left-color: var(--accent);
   background: linear-gradient(
     180deg,
     rgba(15, 118, 110, 0.14),

@@ -4856,6 +4856,7 @@ function renderLabeledGroup(title, count, cardsHtml){
 
 function renderSessionList(){
   const box = document.getElementById('sessions');
+  const previousScrollTop = box ? box.scrollTop : 0;
   updateReloadButtonState();
   if(state.isSessionsLoading && !state.hasLoadedSessions){
     box.innerHTML = renderInlineStatus(
@@ -4883,6 +4884,9 @@ function renderSessionList(){
         );
   } else {
     box.innerHTML = state.filtered.map(s => renderSessionCard(s, { active: state.activePath === s.path })).join('');
+  }
+  if(box){
+    box.scrollTop = previousScrollTop;
   }
   if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'reload_refresh' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
     setStatusLayer(
@@ -5452,6 +5456,7 @@ async function openSession(path, options){
     clearMessageRangeSelection();
   }
   renderSessionList();
+  renderLabeledList();
   renderActiveSession();
   try {
     const metaUrl = '/api/session?path=' + encodeURIComponent(path) + '&include_events=false&ts=' + Date.now();
