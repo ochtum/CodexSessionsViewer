@@ -790,6 +790,7 @@ const I18N = {
     'status.sessions.refreshCopy': '最新のセッションを再取得しています。',
     'status.sessions.backgroundTitle': '残りのセッションを読み込み中...',
     'status.sessions.backgroundCopy': '操作は続けたまま、一覧を少しずつ追加しています。',
+    'status.sessions.backgroundInline': '追加読込中 {loaded} / {total}',
     'status.labels.loadingTitle': 'ラベルリストを読み込み中...',
     'status.labels.loadingCopy': 'ラベル付きのセッションとイベントを整理しています。',
     'status.labels.errorTitle': 'ラベルリストの取得に失敗しました',
@@ -1016,6 +1017,7 @@ const I18N = {
     'status.sessions.refreshCopy': 'Fetching the latest sessions again.',
     'status.sessions.backgroundTitle': 'Loading more sessions...',
     'status.sessions.backgroundCopy': 'The remaining sessions are being added in the background.',
+    'status.sessions.backgroundInline': 'Loading more {loaded} / {total}',
     'status.labels.loadingTitle': 'Loading labeled items...',
     'status.labels.loadingCopy': 'Collecting labeled sessions and events.',
     'status.labels.errorTitle': 'Failed to load the label list',
@@ -1242,6 +1244,7 @@ const I18N = {
     'status.sessions.refreshCopy': '正在重新获取最新会话。',
     'status.sessions.backgroundTitle': '正在继续加载其余会话...',
     'status.sessions.backgroundCopy': '不会打断当前操作，列表会逐步追加。',
+    'status.sessions.backgroundInline': '继续加载 {loaded} / {total}',
     'status.labels.loadingTitle': '正在加载标签列表...',
     'status.labels.loadingCopy': '正在整理带标签的会话和事件。',
     'status.labels.errorTitle': '获取标签列表失败',
@@ -1440,6 +1443,7 @@ I18N['zh-Hant'] = {
   'status.sessions.refreshCopy': '正在重新取得最新工作階段。',
   'status.sessions.backgroundTitle': '正在繼續載入其餘工作階段...',
   'status.sessions.backgroundCopy': '不會打斷目前操作，列表會逐步追加。',
+  'status.sessions.backgroundInline': '繼續載入 {loaded} / {total}',
   'status.labels.loadingTitle': '正在載入標籤列表...',
   'status.labels.loadingCopy': '正在整理帶標籤的工作階段與事件。',
   'status.labels.errorTitle': '取得標籤列表失敗',
@@ -1933,6 +1937,25 @@ function setStatusLayer(id, title, copy, tone){
   }
   layer.innerHTML = buildStatusCard(title, copy, tone);
   layer.classList.remove('hidden');
+}
+
+function updateSessionsBackgroundIndicator(){
+  const indicator = document.getElementById('sessions_background_indicator');
+  if(!indicator){
+    return;
+  }
+  if(state.isSessionsBackgroundLoading){
+    indicator.textContent = t('status.sessions.backgroundInline', {
+      loaded: formatNumber(state.sessions.length),
+      total: formatNumber(state.sessionsTotalCount || state.sessions.length),
+    });
+    indicator.setAttribute('title', t('status.sessions.backgroundCopy'));
+    indicator.classList.remove('hidden');
+    return;
+  }
+  indicator.textContent = '';
+  indicator.removeAttribute('title');
+  indicator.classList.add('hidden');
 }
 
 function updateReloadButtonState(){
@@ -5099,14 +5122,8 @@ function renderSessionList(options){
   if(box){
     box.scrollTop = previousScrollTop;
   }
-  if(state.isSessionsBackgroundLoading){
-    setStatusLayer(
-      'sessions_status',
-      t('status.sessions.backgroundTitle'),
-      t('status.sessions.backgroundCopy'),
-      'loading'
-    );
-  } else if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'reload_refresh' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
+  updateSessionsBackgroundIndicator();
+  if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'reload_refresh' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
     setStatusLayer(
       'sessions_status',
       t('status.sessions.refreshTitle'),
