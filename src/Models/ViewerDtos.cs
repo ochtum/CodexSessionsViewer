@@ -118,6 +118,14 @@ public sealed class ModelCatalogStatusDto
 
     public int AliasCount { get; init; }
 
+    public string PricingCatalogUrl { get; init; } = string.Empty;
+
+    public string PricingCatalogCachePath { get; init; } = string.Empty;
+
+    public string PricingCatalogLastRefreshedAt { get; init; } = string.Empty;
+
+    public string PricingCatalogLastError { get; init; } = string.Empty;
+
     public bool OpenAiApiConfigured { get; init; }
 
     public string OpenAiModelsEndpoint { get; init; } = string.Empty;
