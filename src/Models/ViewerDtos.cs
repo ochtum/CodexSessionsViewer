@@ -234,11 +234,21 @@ public sealed class SessionListResponse
     public string Root { get; init; } = string.Empty;
 
     public IReadOnlyList<SessionSummaryDto> Sessions { get; init; } = [];
+
+    public int TotalCount { get; init; }
+
+    public int Offset { get; init; }
+
+    public int Limit { get; init; }
+
+    public bool HasMore { get; init; }
 }
 
 public sealed class SessionDetailResponse
 {
     public SessionSummaryDto? Session { get; init; }
+
+    public string SessionVersion { get; init; } = string.Empty;
 
     public IReadOnlyList<SessionEventDto> Events { get; init; } = [];
 
@@ -247,6 +257,13 @@ public sealed class SessionDetailResponse
     public ExchangeRateDto? ExchangeRate { get; init; }
 
     public TokenUsageSummaryDto? Usage { get; init; }
+}
+
+public sealed class SessionVersionResponse
+{
+    public string Path { get; init; } = string.Empty;
+
+    public string SessionVersion { get; init; } = string.Empty;
 }
 
 public sealed class OkResponse

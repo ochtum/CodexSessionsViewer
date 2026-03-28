@@ -14,6 +14,7 @@ public sealed partial class ViewerService
     // Keep enough index/event cache entries for large session sets to avoid frequent rebuild churn.
     private const int MaxCacheEntries = 2000;
     private static readonly TimeSpan SessionFilesCacheTtl = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan CostSummaryCacheTtl = TimeSpan.FromMinutes(5);
     private static readonly string DefaultSessionsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".codex",
@@ -46,9 +47,11 @@ public sealed partial class ViewerService
     private readonly ModelCatalogService _modelCatalog;
     private readonly ExchangeRateService _exchangeRates;
     private readonly ConcurrentDictionary<string, SessionCacheEntry> _cache = new(PathComparer);
+    private readonly SemaphoreSlim _costSummaryCacheLock = new(1, 1);
     private readonly object _sessionFilesCacheLock = new();
     private IReadOnlyList<string>? _sessionRoots;
     private IReadOnlyList<string>? _wslDistroRoots;
+    private CostSummaryCacheEntry? _costSummaryCache;
     private SessionFilesCacheEntry? _sessionFilesCache;
 
     public ViewerService(
@@ -154,7 +157,32 @@ public sealed partial class ViewerService
         return _modelCatalog.GetStatus();
     }
 
-    public async Task<CostSummaryResponse> GetCostSummaryAsync(CancellationToken cancellationToken = default)
+    public async Task<CostSummaryResponse> GetCostSummaryAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
+    {
+        if (!forceRefresh && TryGetCachedCostSummary(out var cached))
+        {
+            return cached;
+        }
+
+        await _costSummaryCacheLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!forceRefresh && TryGetCachedCostSummary(out cached))
+            {
+                return cached;
+            }
+
+            var response = await BuildCostSummaryAsync(cancellationToken);
+            _costSummaryCache = new CostSummaryCacheEntry(DateTimeOffset.UtcNow, response);
+            return response;
+        }
+        finally
+        {
+            _costSummaryCacheLock.Release();
+        }
+    }
+
+    private async Task<CostSummaryResponse> BuildCostSummaryAsync(CancellationToken cancellationToken = default)
     {
         var timeZone = TimeZoneInfo.Local;
         var nowLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime;
@@ -294,6 +322,7 @@ public sealed partial class ViewerService
         string? sort,
         int? sessionLabelId,
         int? eventLabelId,
+        bool forceRefreshSessionFiles = false,
         CancellationToken cancellationToken = default)
     {
         var roots = GetSessionRoots();
@@ -307,7 +336,7 @@ public sealed partial class ViewerService
             .ToArray();
 
         var sessions = new List<SessionSummaryDto>();
-        foreach (var path in EnumerateSessionFiles(roots))
+        foreach (var path in EnumerateSessionFiles(roots, forceRefreshSessionFiles))
         {
             cancellationToken.ThrowIfCancellationRequested();
             IndexRecord record;
@@ -354,71 +383,85 @@ public sealed partial class ViewerService
                 .ThenByDescending(session => session.Mtime, StringComparer.Ordinal),
         };
 
+        var limitedSessions = ordered.Take(settings.SessionListMax).ToArray();
         return new SessionListResponse
         {
             Root = string.Join(" | ", roots),
-            Sessions = ordered.Take(settings.SessionListMax).ToArray(),
+            Sessions = limitedSessions,
+            TotalCount = limitedSessions.Length,
+            Offset = 0,
+            Limit = settings.SessionListMax,
+            HasMore = false,
         };
     }
 
     public async Task<SessionListResponse> GetSessionsLiteAsync(
         string? sort,
+        int? offset,
+        int? limit,
         CancellationToken cancellationToken = default)
     {
         var roots = GetSessionRoots();
         var settings = _viewerSettings.GetSnapshot();
         var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
         var normalizedSort = sort is "asc" or "updated" ? sort : "desc";
+        var allPaths = EnumerateSessionFiles(roots).ToArray();
+        if (normalizedSort == "asc")
+        {
+            Array.Reverse(allPaths);
+        }
 
-        var sessions = new List<SessionSummaryDto>();
-        foreach (var path in EnumerateSessionFiles(roots))
+        var limitedPaths = allPaths.Take(settings.SessionListMax).ToArray();
+        var totalCount = limitedPaths.Length;
+        var normalizedOffset = Math.Clamp(offset ?? 0, 0, totalCount);
+        var normalizedLimit = Math.Clamp(limit ?? settings.SessionListInitialLoadCount, 1, settings.SessionListMax);
+        var pagePaths = limitedPaths
+            .Skip(normalizedOffset)
+            .Take(normalizedLimit)
+            .ToArray();
+
+        var sessions = new List<SessionSummaryDto>(pagePaths.Length);
+        foreach (var path in pagePaths)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            SessionSummaryDto summary;
+            IndexRecord record;
             try
             {
-                summary = TryGetCachedSummary(path) ?? BuildLiteSummary(path);
+                record = GetOrBuildIndexRecord(path);
             }
             catch (FileNotFoundException)
             {
                 continue;
             }
 
-            var sessionLabelIds = snapshot.SessionLabels.TryGetValue(summary.Path, out var labelIds)
+            var sessionLabelIds = snapshot.SessionLabels.TryGetValue(record.Summary.Path, out var labelIds)
                 ? labelIds
                 : Array.Empty<int>();
-            sessions.Add(WithSessionLabelIds(summary, sessionLabelIds));
+            sessions.Add(WithSessionLabelIds(record.Summary, sessionLabelIds));
         }
-
-        IOrderedEnumerable<SessionSummaryDto> ordered = normalizedSort switch
-        {
-            "asc" => sessions
-                .OrderBy(GetSessionSortKey, StringComparer.Ordinal)
-                .ThenBy(session => session.Mtime, StringComparer.Ordinal),
-            "updated" => sessions
-                .OrderByDescending(session => session.Mtime, StringComparer.Ordinal)
-                .ThenByDescending(GetSessionSortKey, StringComparer.Ordinal),
-            _ => sessions
-                .OrderByDescending(GetSessionSortKey, StringComparer.Ordinal)
-                .ThenByDescending(session => session.Mtime, StringComparer.Ordinal),
-        };
 
         return new SessionListResponse
         {
             Root = string.Join(" | ", roots),
-            Sessions = ordered.Take(settings.SessionListMax).ToArray(),
+            Sessions = sessions,
+            TotalCount = totalCount,
+            Offset = normalizedOffset,
+            Limit = normalizedLimit,
+            HasMore = normalizedOffset + sessions.Count < totalCount,
         };
     }
 
     public async Task<SessionDetailResponse> GetSessionAsync(string? rawPath, bool includeEvents, CancellationToken cancellationToken = default)
     {
         var path = ResolveSessionPath(rawPath);
-        if (!File.Exists(path))
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
         {
             throw new FileNotFoundException("session file not found");
         }
 
+        var sessionVersion = BuildSessionVersion(fileInfo);
         var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
         var indexRecord = GetOrBuildIndexRecord(path);
         var sessionPath = indexRecord.Summary.Path;
@@ -433,6 +476,7 @@ public sealed partial class ViewerService
                     indexRecord.Summary,
                     sessionLabelIds,
                     ResolveLabels(sessionLabelIds, snapshot.LabelById)),
+                SessionVersion = sessionVersion,
                 ExchangeRate = exchangeRate,
             };
         }
@@ -448,6 +492,7 @@ public sealed partial class ViewerService
                 indexRecord.Summary,
                 sessionLabelIds,
                 ResolveLabels(sessionLabelIds, snapshot.LabelById)),
+            SessionVersion = sessionVersion,
             Events = eventsData.Events
                 .Select(@event => WithEventLabels(
                     @event,
@@ -460,6 +505,22 @@ public sealed partial class ViewerService
             RawLineCount = eventsData.RawLineCount,
             ExchangeRate = exchangeRate,
             Usage = eventsData.Usage,
+        };
+    }
+
+    public SessionVersionResponse GetSessionVersion(string? rawPath)
+    {
+        var path = ResolveSessionPath(rawPath);
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
+        {
+            throw new FileNotFoundException("session file not found");
+        }
+
+        return new SessionVersionResponse
+        {
+            Path = path,
+            SessionVersion = BuildSessionVersion(fileInfo),
         };
     }
 
@@ -991,6 +1052,19 @@ public sealed partial class ViewerService
         {
             _cache.TryRemove(item.Key, out _);
         }
+    }
+
+    private bool TryGetCachedCostSummary(out CostSummaryResponse response)
+    {
+        var cached = _costSummaryCache;
+        if (cached is not null && DateTimeOffset.UtcNow - cached.BuiltAtUtc <= CostSummaryCacheTtl)
+        {
+            response = cached.Response;
+            return true;
+        }
+
+        response = null!;
+        return false;
     }
 
     private SessionSummaryDto? TryGetCachedSummary(string path)
@@ -1623,7 +1697,7 @@ public sealed partial class ViewerService
         summary = summary with { MinEventTs = min, MaxEventTs = max };
     }
 
-    private IEnumerable<string> EnumerateSessionFiles(IEnumerable<string> roots)
+    private IEnumerable<string> EnumerateSessionFiles(IEnumerable<string> roots, bool forceRefresh = false)
     {
         var normalizedRoots = roots
             .Where(root => !string.IsNullOrWhiteSpace(root))
@@ -1636,7 +1710,8 @@ public sealed partial class ViewerService
 
         lock (_sessionFilesCacheLock)
         {
-            if (_sessionFilesCache is not null
+            if (!forceRefresh
+                && _sessionFilesCache is not null
                 && _sessionFilesCache.RootsKey == cacheKey
                 && now - _sessionFilesCache.BuiltAtUtc <= SessionFilesCacheTtl)
             {
@@ -2077,6 +2152,12 @@ public sealed partial class ViewerService
         return new SessionSignature(fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length);
     }
 
+    private static string BuildSessionVersion(FileInfo fileInfo)
+    {
+        var signature = GetSignature(fileInfo);
+        return $"{signature.LastWriteTicks}:{signature.Size}";
+    }
+
     private static bool MatchesTerms(string searchText, IReadOnlyList<string> terms, string mode)
     {
         return mode == "or"
@@ -2346,6 +2427,10 @@ public sealed partial class ViewerService
     private sealed record CostSummaryGroupDefinition(
         string Key,
         IReadOnlyList<CostSummaryPeriodDefinition> Periods);
+
+    private sealed record CostSummaryCacheEntry(
+        DateTimeOffset BuiltAtUtc,
+        CostSummaryResponse Response);
 
     private sealed class CostSummaryGroupAccumulator
     {
