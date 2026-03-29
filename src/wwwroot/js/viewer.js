@@ -2636,7 +2636,9 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta,
   const eventKey = getDetailEventKey(ev, fallbackIndex);
   const bodyText = getEventBodyText(ev);
   const eventMatches = searchMeta && searchMeta.matchesByEvent ? (searchMeta.matchesByEvent.get(eventKey) || []) : [];
-  const bodyInner = `<pre>${renderHighlightedEventBody(bodyText, eventMatches)}</pre>`;
+  const bodyInner = ev && ev.kind === 'token_usage'
+    ? renderTokenUsageEventBodyHtml(ev)
+    : `<pre>${renderHighlightedEventBody(bodyText, eventMatches)}</pre>`;
   const body = `<div class="ev-body-wrap" data-event-key="${esc(eventKey)}">${bodyInner}<button class="ev-body-toggle">${esc(t('detail.bodyExpand'))}</button></div>`;
   const selectionKey = getEventSelectionKey(ev);
   const isSelectable = state.isEventSelectionMode && isSelectableMessageEvent(ev);
@@ -2993,6 +2995,72 @@ function formatUsageCostDisplay(value, exchangeRate){
     return formatUsd(value);
   }
   return `${formatUsd(value)} / ${formattedLocal}`;
+}
+
+function formatUsageMetricWithCostDisplay(tokenValue, costUsd, exchangeRate){
+  const tokenCount = Number(tokenValue);
+  const normalizedTokenCount = Number.isFinite(tokenCount) ? tokenCount : 0;
+  const tokenText = formatNumber(normalizedTokenCount);
+  const numericCost = Number(costUsd);
+  if(Number.isFinite(numericCost)){
+    if(normalizedTokenCount > 0 || numericCost !== 0){
+      return `${tokenText} (${formatUsageCostDisplay(numericCost, exchangeRate)})`;
+    }
+    return tokenText;
+  }
+  if(normalizedTokenCount > 0){
+    return `${tokenText} (${t('usage.costUnknown')})`;
+  }
+  return tokenText;
+}
+
+function getUsageMetricDisplayParts(tokenValue, costUsd, exchangeRate){
+  const tokenCount = Number(tokenValue);
+  const normalizedTokenCount = Number.isFinite(tokenCount) ? tokenCount : 0;
+  const primaryText = formatNumber(normalizedTokenCount);
+  const numericCost = Number(costUsd);
+  const secondaryText = Number.isFinite(numericCost)
+    ? (normalizedTokenCount > 0 || numericCost !== 0 ? formatUsageCostDisplay(numericCost, exchangeRate) : '')
+    : (normalizedTokenCount > 0 ? t('usage.costUnknown') : '');
+  return {
+    primaryText,
+    secondaryText,
+  };
+}
+
+function renderPlainUsageMetricValueHtml(value){
+  return `<span class="usage-metric-primary">${esc(value)}</span>`;
+}
+
+function renderUsageMetricValueHtml(tokenValue, costUsd, exchangeRate){
+  const { primaryText, secondaryText } = getUsageMetricDisplayParts(tokenValue, costUsd, exchangeRate);
+  return `<span class="usage-metric-primary">${esc(primaryText)}</span>${secondaryText ? ` <span class="usage-metric-secondary">(${esc(secondaryText)})</span>` : ''}`;
+}
+
+function renderTokenUsageEventBodyHtml(ev){
+  const lines = [];
+  const performance = getUsageCostPerformance(ev.total_tokens || 0, ev.cost_usd);
+  const reasoningLevel = ev.reasoning_effort
+    ? stringifyEventBodyValue(ev.reasoning_effort)
+    : '';
+  if(ev.model){
+    const modelText = reasoningLevel
+      ? `${stringifyEventBodyValue(ev.model)} (${t('meta.reasoningLevel')}: ${reasoningLevel})`
+      : stringifyEventBodyValue(ev.model);
+    lines.push(`${esc(t('usage.model'))}: ${renderPlainUsageMetricValueHtml(modelText)}`);
+  } else if(reasoningLevel){
+    lines.push(`${esc(t('meta.reasoningLevel'))}: ${renderPlainUsageMetricValueHtml(reasoningLevel)}`);
+  }
+  lines.push(`${esc(t('usage.input'))}: ${renderUsageMetricValueHtml(ev.input_tokens, ev.input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.cached'))}: ${renderUsageMetricValueHtml(ev.cached_input_tokens, ev.cached_input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.output'))}: ${renderUsageMetricValueHtml(ev.output_tokens, ev.output_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.reasoning'))}: ${renderUsageMetricValueHtml(ev.reasoning_output_tokens, ev.reasoning_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.total'))}: ${renderPlainUsageMetricValueHtml(formatNumber(ev.total_tokens || 0))}`);
+  lines.push(`${esc(t('usage.cost'))}: ${renderPlainUsageMetricValueHtml(formatUsageCostDisplay(ev.cost_usd, state.activeExchangeRate))}`);
+  lines.push(`${esc(t('usage.perDollar'))}: ${renderPlainUsageMetricValueHtml(formatTokensPerDollar(ev.total_tokens || 0, ev.cost_usd) || '-')}`);
+  lines.push(`${esc(t('usage.score'))}: ${renderPlainUsageMetricValueHtml(formatUsageScoreDisplay(performance.score))}`);
+  lines.push(`${esc(t('usage.rank'))}: ${renderPlainUsageMetricValueHtml(performance.rank || '-')}`);
+  return `<pre class="token-usage-body">${lines.join('\n')}</pre>`;
 }
 
 function formatExchangeRateDisplay(exchangeRate){
@@ -4016,10 +4084,10 @@ function formatTokenUsageEventBody(ev){
   } else if(reasoningLevel){
     lines.push(`${t('meta.reasoningLevel')}: ${reasoningLevel}`);
   }
-  lines.push(`${t('usage.input')}: ${formatNumber(ev.input_tokens || 0)}`);
-  lines.push(`${t('usage.cached')}: ${formatNumber(ev.cached_input_tokens || 0)}`);
-  lines.push(`${t('usage.output')}: ${formatNumber(ev.output_tokens || 0)}`);
-  lines.push(`${t('usage.reasoning')}: ${formatNumber(ev.reasoning_output_tokens || 0)}`);
+  lines.push(`${t('usage.input')}: ${formatUsageMetricWithCostDisplay(ev.input_tokens, ev.input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.cached')}: ${formatUsageMetricWithCostDisplay(ev.cached_input_tokens, ev.cached_input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.output')}: ${formatUsageMetricWithCostDisplay(ev.output_tokens, ev.output_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.reasoning')}: ${formatUsageMetricWithCostDisplay(ev.reasoning_output_tokens, ev.reasoning_cost_usd, state.activeExchangeRate)}`);
   lines.push(`${t('usage.total')}: ${formatNumber(ev.total_tokens || 0)}`);
   lines.push(`${t('usage.cost')}: ${formatUsageCostDisplay(ev.cost_usd, state.activeExchangeRate)}`);
   lines.push(`${t('usage.perDollar')}: ${formatTokensPerDollar(ev.total_tokens || 0, ev.cost_usd) || '-'}`);
@@ -4417,47 +4485,47 @@ function renderUsageMetaRows(usage){
   const metrics = [
     {
       label: t('usage.input'),
-      value: formatNumber(usage.input_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.input_tokens, usage.input_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.input'),
     },
     {
       label: t('usage.cached'),
-      value: formatNumber(usage.cached_input_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.cached_input_tokens, usage.cached_input_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.cached'),
     },
     {
       label: t('usage.output'),
-      value: formatNumber(usage.output_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.output_tokens, usage.output_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.output'),
     },
     {
       label: t('usage.reasoning'),
-      value: formatNumber(usage.reasoning_output_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.reasoning_output_tokens, usage.reasoning_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.reasoning'),
     },
     {
       label: t('usage.total'),
-      value: formatNumber(usage.total_tokens || 0),
+      valueHtml: renderPlainUsageMetricValueHtml(formatNumber(usage.total_tokens || 0)),
       tooltip: t('usage.tooltip.total'),
     },
     {
       label: t('usage.cost'),
-      value: formatUsageCostDisplay(usage.cost_usd, state.activeExchangeRate),
+      valueHtml: renderPlainUsageMetricValueHtml(formatUsageCostDisplay(usage.cost_usd, state.activeExchangeRate)),
       tooltip: t('usage.tooltip.cost'),
     },
     {
       label: t('usage.perDollar'),
-      value: formatTokensPerDollar(usage.total_tokens || 0, usage.cost_usd) || '-',
+      valueHtml: renderPlainUsageMetricValueHtml(formatTokensPerDollar(usage.total_tokens || 0, usage.cost_usd) || '-'),
       tooltip: t('usage.tooltip.perDollar'),
     },
     {
       label: t('usage.score'),
-      value: formatUsageScoreDisplay(performance.score),
+      valueHtml: renderPlainUsageMetricValueHtml(formatUsageScoreDisplay(performance.score)),
       tooltip: t('usage.tooltip.score'),
     },
     {
       label: t('usage.rank'),
-      value: performance.rank || '-',
+      valueHtml: renderPlainUsageMetricValueHtml(performance.rank || '-'),
       tooltip: t('usage.tooltip.rank'),
     },
   ];
@@ -4465,7 +4533,7 @@ function renderUsageMetaRows(usage){
   const reasoningLevel = state.activeSession && state.activeSession.reasoning_effort
     ? String(state.activeSession.reasoning_effort).trim()
     : '';
-  const usageRow = `<div class="header-meta-row"><span class="header-meta-label">${esc(t('meta.usage'))}</span><div class="usage-meta-items">${metrics.map(({ label, value, tooltip }, index) => `<span class="usage-metric" data-tooltip="${esc(tooltip)}" data-tooltip-align="${esc(getUsageTooltipAlign(index, metrics.length))}" tabindex="0" aria-label="${esc(`${label}: ${tooltip}`)}"><span class="meta-tag">${esc(`${label}:`)}</span><span class="header-meta-text usage-metric-value">${esc(value)}</span></span>`).join('')}</div></div>`;
+  const usageRow = `<div class="header-meta-row"><span class="header-meta-label">${esc(t('meta.usage'))}</span><div class="usage-meta-items">${metrics.map(({ label, valueHtml, tooltip }, index) => `<span class="usage-metric" data-tooltip="${esc(tooltip)}" data-tooltip-align="${esc(getUsageTooltipAlign(index, metrics.length))}" tabindex="0" aria-label="${esc(`${label}: ${tooltip}`)}"><span class="meta-tag">${esc(`${label}:`)}</span><span class="header-meta-text usage-metric-value">${valueHtml}</span></span>`).join('')}</div></div>`;
   let modelsRow = '';
   if(models.length){
     const reasoningTag = reasoningLevel
