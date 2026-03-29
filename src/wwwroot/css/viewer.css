@@ -2218,6 +2218,38 @@ button:disabled {
   color: var(--muted);
   font-size: var(--text-caption);
 }
+.event-usage-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.usage-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid #d7e1ea;
+  background: #f8fbff;
+  color: #334155;
+  font-size: var(--text-label);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.usage-badge-strong {
+  color: #0b3a67;
+  background: #e7f1ff;
+  border-color: #bdd9f7;
+}
+.usage-badge-cost {
+  color: #0f5a5a;
+  background: #e5f7f7;
+  border-color: #bfe8e8;
+}
+.event-usage-row .usage-badge {
+  font-size: var(--text-caption);
+}
 .event-actions {
   display: inline-flex;
   align-items: center;

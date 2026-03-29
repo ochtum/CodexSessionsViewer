@@ -66,17 +66,40 @@ public sealed class ModelCatalogService : BackgroundService
         return GetPricingCatalog().Version;
     }
 
-    public decimal? TryCalculateCostUsd(string rawModel, long inputTokens, long cachedInputTokens, long outputTokens)
+    public CostBreakdownUsd? TryCalculateCostBreakdownUsd(
+        string rawModel,
+        long inputTokens,
+        long cachedInputTokens,
+        long outputTokens,
+        long reasoningOutputTokens)
     {
         if (!TryResolvePricing(rawModel, out var pricing))
         {
             return null;
         }
 
-        var nonCachedInputTokens = Math.Max(inputTokens - cachedInputTokens, 0);
-        return ((decimal)nonCachedInputTokens / 1_000_000m) * pricing.InputCostPerMillionTokens
-            + ((decimal)Math.Max(cachedInputTokens, 0) / 1_000_000m) * pricing.CachedInputCostPerMillionTokens
-            + ((decimal)Math.Max(outputTokens, 0) / 1_000_000m) * pricing.OutputCostPerMillionTokens;
+        var normalizedInputTokens = Math.Max(inputTokens, 0);
+        var normalizedCachedInputTokens = Math.Clamp(cachedInputTokens, 0, normalizedInputTokens);
+        var normalizedOutputTokens = Math.Max(outputTokens, 0);
+        var normalizedReasoningOutputTokens = Math.Clamp(reasoningOutputTokens, 0, normalizedOutputTokens);
+        var nonCachedInputTokens = Math.Max(normalizedInputTokens - normalizedCachedInputTokens, 0);
+        var nonReasoningOutputTokens = Math.Max(normalizedOutputTokens - normalizedReasoningOutputTokens, 0);
+
+        var inputCostUsd = ((decimal)nonCachedInputTokens / 1_000_000m) * pricing.InputCostPerMillionTokens;
+        var cachedInputCostUsd = ((decimal)normalizedCachedInputTokens / 1_000_000m) * pricing.CachedInputCostPerMillionTokens;
+        var outputCostUsd = ((decimal)nonReasoningOutputTokens / 1_000_000m) * pricing.OutputCostPerMillionTokens;
+        var reasoningCostUsd = ((decimal)normalizedReasoningOutputTokens / 1_000_000m) * pricing.OutputCostPerMillionTokens;
+
+        return new CostBreakdownUsd(
+            inputCostUsd,
+            cachedInputCostUsd,
+            outputCostUsd,
+            reasoningCostUsd);
+    }
+
+    public decimal? TryCalculateCostUsd(string rawModel, long inputTokens, long cachedInputTokens, long outputTokens)
+    {
+        return TryCalculateCostBreakdownUsd(rawModel, inputTokens, cachedInputTokens, outputTokens, 0)?.TotalCostUsd;
     }
 
     public ModelCatalogStatusDto GetStatus()
@@ -867,6 +890,15 @@ public sealed class ModelCatalogService : BackgroundService
         DateTimeOffset? LastWriteTimeUtc,
         IReadOnlyDictionary<string, PricingCatalogEntry> Models,
         IReadOnlyDictionary<string, string> Aliases);
+
+    public sealed record CostBreakdownUsd(
+        decimal InputCostUsd,
+        decimal CachedInputCostUsd,
+        decimal OutputCostUsd,
+        decimal ReasoningCostUsd)
+    {
+        public decimal TotalCostUsd => InputCostUsd + CachedInputCostUsd + OutputCostUsd + ReasoningCostUsd;
+    }
 
     private sealed record PricingCatalogRefreshSnapshot(
         string CatalogUrl,

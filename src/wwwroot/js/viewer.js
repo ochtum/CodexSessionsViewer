@@ -2626,7 +2626,7 @@ function setDetailEventBodyExpanded(path, eventKey, expanded){
   }
 }
 
-function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta){
+function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta, projectedAssistantUsageByEventId){
   const role = ev.role || 'system';
   const roleLabel = role.replaceAll('_', ' ');
   const kindLabel = (ev.kind || 'event').replaceAll('_', ' ');
@@ -2654,7 +2654,19 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
     ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">${esc(t('copy.single'))}</button>`
     : '';
   const systemLabelsHtml = systemLabels.map(label => `<span class="badge-kind badge-system-label">${esc(label)}</span>`).join('');
-  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}" data-event-id="${esc(ev.event_id || '')}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(kindLabel)}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
+  const projectedUsage = ev
+    && ev.kind === 'message'
+    && ev.role === 'assistant'
+    && projectedAssistantUsageByEventId
+    ? projectedAssistantUsageByEventId.get(String(ev.event_id || '')) || null
+    : null;
+  const usageBadgesHtml = ev && ev.kind === 'token_usage'
+    ? renderTokenUsageBadges(ev)
+    : renderUsageBadges(projectedUsage);
+  const bodyWithUsage = usageBadgesHtml
+    ? `<div class="event-usage-row">${usageBadgesHtml}</div>${body}`
+    : body;
+  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}" data-event-id="${esc(ev.event_id || '')}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(kindLabel)}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${bodyWithUsage}</div>`;
 }
 
 function attachVisibleEventCardHandlers(eventsBox, startIndex, endIndex){
@@ -2695,6 +2707,7 @@ const EVENT_RENDER_CHUNK_SIZE = 100;
 
 function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchMeta){
   cancelPendingChunkRender();
+  const projectedAssistantUsageByEventId = buildProjectedAssistantUsageMap(state.activeEvents || []);
   const targetMatch = searchMeta && pendingDetailKeywordFocusIndex >= 0
     ? searchMeta.matches[pendingDetailKeywordFocusIndex] || null
     : null;
@@ -2706,7 +2719,7 @@ function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchM
   const firstChunk = displayEvents.slice(0, EVENT_RENDER_FIRST_CHUNK);
   const remaining = displayEvents.slice(EVENT_RENDER_FIRST_CHUNK);
 
-  eventsBox.innerHTML = firstChunk.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index, searchMeta)).join('');
+  eventsBox.innerHTML = firstChunk.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index, searchMeta, projectedAssistantUsageByEventId)).join('');
   eventsBox.scrollTop = targetScrollTop;
   attachVisibleEventCardHandlers(eventsBox);
 
@@ -2719,7 +2732,7 @@ function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchM
       if(chunk.length === 0) return;
       const fragment = document.createDocumentFragment();
       const temp = document.createElement('div');
-      temp.innerHTML = chunk.map((ev, i) => buildEventCardHtml(ev, selectedEventLabelId, offset + i, searchMeta)).join('');
+      temp.innerHTML = chunk.map((ev, i) => buildEventCardHtml(ev, selectedEventLabelId, offset + i, searchMeta, projectedAssistantUsageByEventId)).join('');
       while(temp.firstChild) fragment.appendChild(temp.firstChild);
       eventsBox.appendChild(fragment);
       attachVisibleEventCardHandlers(eventsBox, offset, offset + chunk.length);
@@ -3070,6 +3083,121 @@ function formatUsageScoreDisplay(value){
     return '-';
   }
   return score.toFixed(2);
+}
+
+function buildUsageBadge(label, extraClass){
+  return `<span class="usage-badge${extraClass ? ` ${extraClass}` : ''}">${esc(label)}</span>`;
+}
+
+function hasUsageBadgeData(usage){
+  if(!usage){
+    return false;
+  }
+  return Number(usage.total_tokens || 0) > 0
+    || Number(usage.input_tokens || 0) > 0
+    || Number(usage.cached_input_tokens || 0) > 0
+    || Number(usage.output_tokens || 0) > 0
+    || Number(usage.reasoning_output_tokens || 0) > 0
+    || Number.isFinite(Number(usage.cost_usd));
+}
+
+function renderUsageBadges(usage){
+  if(!hasUsageBadgeData(usage)){
+    return '';
+  }
+  const badges = [];
+  if(Number(usage.total_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.total')} ${formatNumber(usage.total_tokens || 0)}`, 'usage-badge-strong'));
+  }
+  if(Number(usage.input_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.input')} ${formatNumber(usage.input_tokens || 0)}`));
+  }
+  if(Number(usage.cached_input_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.cached')} ${formatNumber(usage.cached_input_tokens || 0)}`));
+  }
+  if(Number(usage.output_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.output')} ${formatNumber(usage.output_tokens || 0)}`));
+  }
+  if(Number(usage.reasoning_output_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.reasoning')} ${formatNumber(usage.reasoning_output_tokens || 0)}`));
+  }
+  if(Number.isFinite(Number(usage.cost_usd))){
+    badges.push(buildUsageBadge(`${t('usage.cost')} ${formatUsageCostDisplay(usage.cost_usd, state.activeExchangeRate)}`, 'usage-badge-cost'));
+  }
+  return badges.join('');
+}
+
+function renderTokenUsageBadges(ev){
+  return renderUsageBadges(ev);
+}
+
+function buildProjectedAssistantUsageMap(events){
+  const projected = new Map();
+  if(!Array.isArray(events) || events.length === 0){
+    return projected;
+  }
+
+  for(let index = 0; index < events.length; index++){
+    const ev = events[index];
+    if(!ev || ev.kind !== 'message' || ev.role !== 'assistant' || !ev.event_id){
+      continue;
+    }
+
+    let aggregate = null;
+    for(let nextIndex = index + 1; nextIndex < events.length; nextIndex++){
+      const candidate = events[nextIndex];
+      if(!candidate){
+        continue;
+      }
+      if(candidate.kind === 'message' && (candidate.role === 'assistant' || candidate.role === 'user' || candidate.role === 'user_context')){
+        break;
+      }
+      if(candidate.kind !== 'token_usage'){
+        continue;
+      }
+      if(!aggregate){
+        aggregate = {
+          input_tokens: 0,
+          cached_input_tokens: 0,
+          output_tokens: 0,
+          reasoning_output_tokens: 0,
+          total_tokens: 0,
+          cost_usd: 0,
+          has_known_cost: false,
+          has_unknown_cost: false,
+        };
+      }
+      aggregate.input_tokens += Number(candidate.input_tokens || 0);
+      aggregate.cached_input_tokens += Number(candidate.cached_input_tokens || 0);
+      aggregate.output_tokens += Number(candidate.output_tokens || 0);
+      aggregate.reasoning_output_tokens += Number(candidate.reasoning_output_tokens || 0);
+      aggregate.total_tokens += Number(candidate.total_tokens || 0);
+      if(Number.isFinite(Number(candidate.cost_usd))){
+        aggregate.cost_usd += Number(candidate.cost_usd);
+        aggregate.has_known_cost = true;
+      } else if(Number(candidate.total_tokens || 0) > 0){
+        aggregate.has_unknown_cost = true;
+      }
+    }
+
+    if(!aggregate){
+      continue;
+    }
+
+    const projectedUsage = {
+      input_tokens: aggregate.input_tokens,
+      cached_input_tokens: aggregate.cached_input_tokens,
+      output_tokens: aggregate.output_tokens,
+      reasoning_output_tokens: aggregate.reasoning_output_tokens,
+      total_tokens: aggregate.total_tokens,
+      cost_usd: aggregate.has_known_cost && !aggregate.has_unknown_cost ? aggregate.cost_usd : null,
+    };
+    if(hasUsageBadgeData(projectedUsage)){
+      projected.set(String(ev.event_id), projectedUsage);
+    }
+  }
+
+  return projected;
 }
 
 function extractTodayUsageSummary(costSummary){
@@ -3894,6 +4022,7 @@ function formatTokenUsageEventBody(ev){
   lines.push(`${t('usage.reasoning')}: ${formatNumber(ev.reasoning_output_tokens || 0)}`);
   lines.push(`${t('usage.total')}: ${formatNumber(ev.total_tokens || 0)}`);
   lines.push(`${t('usage.cost')}: ${formatUsageCostDisplay(ev.cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.perDollar')}: ${formatTokensPerDollar(ev.total_tokens || 0, ev.cost_usd) || '-'}`);
   lines.push(`${t('usage.score')}: ${formatUsageScoreDisplay(performance.score)}`);
   lines.push(`${t('usage.rank')}: ${performance.rank || '-'}`);
   return lines.join('\n');
@@ -4315,6 +4444,11 @@ function renderUsageMetaRows(usage){
       label: t('usage.cost'),
       value: formatUsageCostDisplay(usage.cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.cost'),
+    },
+    {
+      label: t('usage.perDollar'),
+      value: formatTokensPerDollar(usage.total_tokens || 0, usage.cost_usd) || '-',
+      tooltip: t('usage.tooltip.perDollar'),
     },
     {
       label: t('usage.score'),

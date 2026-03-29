@@ -84,6 +84,14 @@ public sealed class SessionEventDto
 
     public long TotalTokens { get; init; }
 
+    public decimal? InputCostUsd { get; init; }
+
+    public decimal? CachedInputCostUsd { get; init; }
+
+    public decimal? OutputCostUsd { get; init; }
+
+    public decimal? ReasoningCostUsd { get; init; }
+
     public decimal? CostUsd { get; init; }
 
     public IReadOnlyList<string> SystemLabels { get; init; } = [];
@@ -104,6 +112,14 @@ public sealed class TokenUsageSummaryDto
     public long ReasoningOutputTokens { get; init; }
 
     public long TotalTokens { get; init; }
+
+    public decimal? InputCostUsd { get; init; }
+
+    public decimal? CachedInputCostUsd { get; init; }
+
+    public decimal? OutputCostUsd { get; init; }
+
+    public decimal? ReasoningCostUsd { get; init; }
 
     public decimal? CostUsd { get; init; }
 }
@@ -167,6 +183,14 @@ public sealed class CostSummaryPeriodDto
     public long ReasoningOutputTokens { get; init; }
 
     public long TotalTokens { get; init; }
+
+    public decimal? InputCostUsd { get; init; }
+
+    public decimal? CachedInputCostUsd { get; init; }
+
+    public decimal? OutputCostUsd { get; init; }
+
+    public decimal? ReasoningCostUsd { get; init; }
 
     public decimal? CostUsd { get; init; }
 }

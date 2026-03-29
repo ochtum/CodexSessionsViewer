@@ -952,11 +952,16 @@ public sealed partial class ViewerService
             CallId = @event.CallId,
             Output = @event.Output,
             Model = @event.Model,
+            ReasoningEffort = @event.ReasoningEffort,
             InputTokens = @event.InputTokens,
             CachedInputTokens = @event.CachedInputTokens,
             OutputTokens = @event.OutputTokens,
             ReasoningOutputTokens = @event.ReasoningOutputTokens,
             TotalTokens = @event.TotalTokens,
+            InputCostUsd = @event.InputCostUsd,
+            CachedInputCostUsd = @event.CachedInputCostUsd,
+            OutputCostUsd = @event.OutputCostUsd,
+            ReasoningCostUsd = @event.ReasoningCostUsd,
             CostUsd = @event.CostUsd,
             SystemLabels = @event.SystemLabels,
             Labels = labels,
@@ -1435,11 +1440,12 @@ public sealed partial class ViewerService
             return null;
         }
 
-        var costUsd = _modelCatalog.TryCalculateCostUsd(
+        var costBreakdown = _modelCatalog.TryCalculateCostBreakdownUsd(
             currentModel,
             normalized.InputTokens,
             normalized.CachedInputTokens,
-            normalized.OutputTokens);
+            normalized.OutputTokens,
+            normalized.ReasoningOutputTokens);
         return new SessionEventDto
         {
             EventId = $"line-{rawLineCount}",
@@ -1453,7 +1459,11 @@ public sealed partial class ViewerService
             OutputTokens = normalized.OutputTokens,
             ReasoningOutputTokens = normalized.ReasoningOutputTokens,
             TotalTokens = normalized.TotalTokens,
-            CostUsd = costUsd,
+            InputCostUsd = costBreakdown?.InputCostUsd,
+            CachedInputCostUsd = costBreakdown?.CachedInputCostUsd,
+            OutputCostUsd = costBreakdown?.OutputCostUsd,
+            ReasoningCostUsd = costBreakdown?.ReasoningCostUsd,
+            CostUsd = costBreakdown?.TotalCostUsd,
         };
     }
 
@@ -2500,6 +2510,10 @@ public sealed partial class ViewerService
         private long _outputTokens;
         private long _reasoningOutputTokens;
         private long _totalTokens;
+        private decimal _inputCostUsd;
+        private decimal _cachedInputCostUsd;
+        private decimal _outputCostUsd;
+        private decimal _reasoningCostUsd;
         private decimal _costUsd;
         private bool _hasUnknownPricing;
 
@@ -2512,8 +2526,16 @@ public sealed partial class ViewerService
             _reasoningOutputTokens += usage.ReasoningOutputTokens;
             _totalTokens += usage.TotalTokens;
 
-            if (usage.CostUsd.HasValue)
+            if (usage.CostUsd.HasValue
+                && usage.InputCostUsd.HasValue
+                && usage.CachedInputCostUsd.HasValue
+                && usage.OutputCostUsd.HasValue
+                && usage.ReasoningCostUsd.HasValue)
             {
+                _inputCostUsd += usage.InputCostUsd.Value;
+                _cachedInputCostUsd += usage.CachedInputCostUsd.Value;
+                _outputCostUsd += usage.OutputCostUsd.Value;
+                _reasoningCostUsd += usage.ReasoningCostUsd.Value;
                 _costUsd += usage.CostUsd.Value;
             }
             else
@@ -2531,8 +2553,16 @@ public sealed partial class ViewerService
             _reasoningOutputTokens += usageEvent.ReasoningOutputTokens;
             _totalTokens += usageEvent.TotalTokens;
 
-            if (usageEvent.CostUsd.HasValue)
+            if (usageEvent.CostUsd.HasValue
+                && usageEvent.InputCostUsd.HasValue
+                && usageEvent.CachedInputCostUsd.HasValue
+                && usageEvent.OutputCostUsd.HasValue
+                && usageEvent.ReasoningCostUsd.HasValue)
             {
+                _inputCostUsd += usageEvent.InputCostUsd.Value;
+                _cachedInputCostUsd += usageEvent.CachedInputCostUsd.Value;
+                _outputCostUsd += usageEvent.OutputCostUsd.Value;
+                _reasoningCostUsd += usageEvent.ReasoningCostUsd.Value;
                 _costUsd += usageEvent.CostUsd.Value;
             }
             else
@@ -2552,6 +2582,10 @@ public sealed partial class ViewerService
                 OutputTokens = _outputTokens,
                 ReasoningOutputTokens = _reasoningOutputTokens,
                 TotalTokens = _totalTokens,
+                InputCostUsd = _hasUnknownPricing ? null : _inputCostUsd,
+                CachedInputCostUsd = _hasUnknownPricing ? null : _cachedInputCostUsd,
+                OutputCostUsd = _hasUnknownPricing ? null : _outputCostUsd,
+                ReasoningCostUsd = _hasUnknownPricing ? null : _reasoningCostUsd,
                 CostUsd = _hasUnknownPricing ? null : _costUsd,
             };
         }
@@ -2565,6 +2599,10 @@ public sealed partial class ViewerService
         private long _outputTokens;
         private long _reasoningOutputTokens;
         private long _totalTokens;
+        private decimal _inputCostUsd;
+        private decimal _cachedInputCostUsd;
+        private decimal _outputCostUsd;
+        private decimal _reasoningCostUsd;
         private decimal _costUsd;
         private bool _hasUnknownPricing;
 
@@ -2588,8 +2626,16 @@ public sealed partial class ViewerService
                 _models.Add(@event.Model);
             }
 
-            if (@event.CostUsd.HasValue)
+            if (@event.CostUsd.HasValue
+                && @event.InputCostUsd.HasValue
+                && @event.CachedInputCostUsd.HasValue
+                && @event.OutputCostUsd.HasValue
+                && @event.ReasoningCostUsd.HasValue)
             {
+                _inputCostUsd += @event.InputCostUsd.Value;
+                _cachedInputCostUsd += @event.CachedInputCostUsd.Value;
+                _outputCostUsd += @event.OutputCostUsd.Value;
+                _reasoningCostUsd += @event.ReasoningCostUsd.Value;
                 _costUsd += @event.CostUsd.Value;
             }
             else
@@ -2608,6 +2654,10 @@ public sealed partial class ViewerService
                 OutputTokens = _outputTokens,
                 ReasoningOutputTokens = _reasoningOutputTokens,
                 TotalTokens = _totalTokens,
+                InputCostUsd = _hasUnknownPricing ? null : _inputCostUsd,
+                CachedInputCostUsd = _hasUnknownPricing ? null : _cachedInputCostUsd,
+                OutputCostUsd = _hasUnknownPricing ? null : _outputCostUsd,
+                ReasoningCostUsd = _hasUnknownPricing ? null : _reasoningCostUsd,
                 CostUsd = _hasUnknownPricing ? null : _costUsd,
             };
         }
