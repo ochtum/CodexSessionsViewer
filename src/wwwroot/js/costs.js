@@ -1,6 +1,8 @@
 (() => {
 const LANGUAGE_STORAGE_KEY = 'codex_sessions_viewer_language_v1';
 const COST_CURRENCY_STORAGE_KEY = 'codex_sessions_viewer_cost_currency_v1';
+const COST_SUMMARY_CACHE_KEY = 'codex_sessions_viewer_cost_summary_cache_v1';
+const COST_SUMMARY_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const SUPPORTED_LANGUAGES = ['ja', 'en', 'zh-Hans', 'zh-Hant'];
 const SUPPORTED_COST_CURRENCIES = ['USD', 'JPY', 'CNY', 'TWD', 'HKD'];
 const COST_I18N = {
@@ -11,6 +13,7 @@ const COST_I18N = {
     'page.badge': 'Codex Sessions Viewer',
     'page.heroTitle': 'コスト表示',
     'page.heroCopy': '月別・週別・日別の usage 集計を、セッション別と token usage イベント別で見比べられます。',
+    'page.note': '金額内訳の input は非cache入力、output は非reasoning出力として分割しています。',
     'page.refresh': 'Refresh',
     'meta.generatedAt': '更新日時',
     'meta.timeZone': 'タイムゾーン',
@@ -52,6 +55,7 @@ const COST_I18N = {
     'page.badge': 'Codex Sessions Viewer',
     'page.heroTitle': 'Cost Summary',
     'page.heroCopy': 'Compare monthly, weekly, and daily usage totals with session-based and token-usage-event-based views.',
+    'page.note': 'Breakdown costs split input into non-cached input, and output into non-reasoning output.',
     'page.refresh': 'Refresh',
     'meta.generatedAt': 'Updated',
     'meta.timeZone': 'Time zone',
@@ -93,6 +97,7 @@ const COST_I18N = {
     'page.badge': 'Codex Sessions Viewer',
     'page.heroTitle': '成本汇总',
     'page.heroCopy': '可按月、周、日查看 usage 汇总，并对比“按会话”和“按 token usage 事件”两种视角。',
+    'page.note': '金额明细中，input 按非 cache 输入计，output 按非 reasoning 输出计。',
     'page.refresh': 'Refresh',
     'meta.generatedAt': '更新时间',
     'meta.timeZone': '时区',
@@ -135,6 +140,7 @@ COST_I18N['zh-Hant'] = {
   'page.title': '成本彙總 | Codex Sessions Viewer',
   'page.heroTitle': '成本彙總',
   'page.heroCopy': '可按月、週、日查看 usage 彙總，並比較「按工作階段」與「按 token usage 事件」兩種視角。',
+  'page.note': '金額明細中，input 以非 cache 輸入計算，output 以非 reasoning 輸出計算。',
   'meta.generatedAt': '更新時間',
   'meta.timeZone': '時區',
   'meta.fxRate': '匯率',
@@ -372,6 +378,23 @@ function formatPeriodCostDisplay(period){
     : t('usage.costUnknown');
 }
 
+function formatMetricCostDisplay(value, itemCount){
+  if(Number(itemCount || 0) === 0){
+    return '';
+  }
+  return typeof value === 'number' && Number.isFinite(value)
+    ? formatCostDisplay(value, costSummaryData && costSummaryData.exchange_rate)
+    : t('usage.costUnknown');
+}
+
+function renderMetricCell(tokenValue, costValue, itemCount){
+  const costText = formatMetricCostDisplay(costValue, itemCount);
+  return `<div class="costs-metric-cell">
+    <div class="costs-metric-value">${esc(formatNumber(tokenValue || 0))}</div>
+    ${costText ? `<div class="costs-metric-cost">${esc(costText)}</div>` : ''}
+  </div>`;
+}
+
 function formatTokensPerDollar(totalTokens, costUsd){
   const total = Number(totalTokens);
   const cost = Number(costUsd);
@@ -441,6 +464,53 @@ function setStatus(text, tone){
   status.classList.toggle('error', tone === 'error');
 }
 
+function readCostSummaryCache(){
+  try {
+    const raw = localStorage.getItem(COST_SUMMARY_CACHE_KEY) || '';
+    if(!raw){
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if(!parsed || typeof parsed !== 'object' || !parsed.data){
+      return null;
+    }
+    const savedAt = Number(parsed.saved_at);
+    return {
+      data: parsed.data,
+      savedAt: Number.isFinite(savedAt) ? savedAt : 0,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeCostSummaryCache(data){
+  if(!data){
+    return;
+  }
+  try {
+    localStorage.setItem(COST_SUMMARY_CACHE_KEY, JSON.stringify({
+      saved_at: Date.now(),
+      data,
+    }));
+  } catch (error) {
+    // Ignore storage quota errors and keep the page state only.
+  }
+}
+
+function isCostSummaryCacheFresh(entry){
+  return !!entry
+    && Number.isFinite(entry.savedAt)
+    && entry.savedAt > 0
+    && (Date.now() - entry.savedAt) <= COST_SUMMARY_CACHE_MAX_AGE_MS;
+}
+
+function applyCostSummaryData(data){
+  costSummaryData = data || null;
+  renderMeta();
+  renderGroups();
+}
+
 function renderMeta(){
   const meta = document.getElementById('costs_meta');
   if(!meta){
@@ -485,10 +555,10 @@ function renderScopeTable(periods){
     return `<tr>
       <td class="costs-period-label">${esc(t(`period.${period.key}`))}</td>
       <td>${esc(formatNumber(period.item_count || 0))}</td>
-      <td>${esc(formatNumber(period.input_tokens || 0))}</td>
-      <td>${esc(formatNumber(period.cached_input_tokens || 0))}</td>
-      <td>${esc(formatNumber(period.output_tokens || 0))}</td>
-      <td>${esc(formatNumber(period.reasoning_output_tokens || 0))}</td>
+      <td>${renderMetricCell(period.input_tokens || 0, period.input_cost_usd, period.item_count || 0)}</td>
+      <td>${renderMetricCell(period.cached_input_tokens || 0, period.cached_input_cost_usd, period.item_count || 0)}</td>
+      <td>${renderMetricCell(period.output_tokens || 0, period.output_cost_usd, period.item_count || 0)}</td>
+      <td>${renderMetricCell(period.reasoning_output_tokens || 0, period.reasoning_cost_usd, period.item_count || 0)}</td>
       <td>${esc(formatNumber(period.total_tokens || 0))}</td>
       <td>${esc(formatPeriodCostDisplay(period))}</td>
       <td>${esc(formatTokensPerDollar(period.total_tokens || 0, period.cost_usd) || '-')}</td>
@@ -556,28 +626,39 @@ function applyLanguage(){
   if(copy){
     copy.textContent = t('page.heroCopy');
   }
+  const note = document.getElementById('page_note');
+  if(note){
+    note.textContent = t('page.note');
+  }
   renderMeta();
   renderGroups();
 }
 
-async function loadCostSummary(){
+async function loadCostSummary(options){
+  const opts = options || {};
   isLoading = true;
   const refresh = document.getElementById('refresh_costs');
   if(refresh){
     refresh.disabled = true;
   }
-  setStatus(t('status.loading'));
+  if(!opts.silent){
+    setStatus(t('status.loading'));
+  }
   try {
-    const response = await fetch(`/api/cost-summary?ts=${Date.now()}`, { cache: 'no-store' });
+    const params = new URLSearchParams();
+    params.set('ts', Date.now().toString());
+    if(opts.forceRefresh){
+      params.set('force', '1');
+    }
+    const response = await fetch(`/api/cost-summary?${params.toString()}`, { cache: 'no-store' });
     const data = await response.json();
-    costSummaryData = data;
-    renderMeta();
-    renderGroups();
+    writeCostSummaryCache(data);
+    applyCostSummaryData(data);
     setStatus('');
   } catch (error) {
-    costSummaryData = null;
-    renderMeta();
-    renderGroups();
+    if(!costSummaryData || opts.clearOnError){
+      applyCostSummaryData(null);
+    }
     setStatus(t('status.error'), 'error');
   } finally {
     isLoading = false;
@@ -644,7 +725,7 @@ function initCostsPage(){
   const refresh = document.getElementById('refresh_costs');
   if(refresh){
     refresh.addEventListener('click', () => {
-      void loadCostSummary();
+      void loadCostSummary({ forceRefresh: true });
     });
   }
 
@@ -662,10 +743,27 @@ function initCostsPage(){
       if(nextCurrency !== getPreferredCostCurrencyCode()){
         setCostCurrency(nextCurrency, false);
       }
+      return;
+    }
+    if(event.key === COST_SUMMARY_CACHE_KEY){
+      const cached = readCostSummaryCache();
+      if(cached && cached.data){
+        applyCostSummaryData(cached.data);
+        setStatus('');
+      }
     }
   });
 
-  void loadCostSummary();
+  const cached = readCostSummaryCache();
+  if(cached && cached.data){
+    applyCostSummaryData(cached.data);
+    setStatus('');
+    if(!isCostSummaryCacheFresh(cached)){
+      void loadCostSummary({ silent: true });
+    }
+  } else {
+    void loadCostSummary();
+  }
 }
 
 if(document.readyState === 'loading'){

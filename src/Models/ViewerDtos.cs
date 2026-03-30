@@ -35,6 +35,8 @@ public sealed record SessionSummaryDto
 
     public string Source { get; init; } = string.Empty;
 
+    public bool IsSubagent { get; init; }
+
     public string FirstUserText { get; init; } = string.Empty;
 
     public string FirstRealUserText { get; init; } = string.Empty;
@@ -82,6 +84,14 @@ public sealed class SessionEventDto
 
     public long TotalTokens { get; init; }
 
+    public decimal? InputCostUsd { get; init; }
+
+    public decimal? CachedInputCostUsd { get; init; }
+
+    public decimal? OutputCostUsd { get; init; }
+
+    public decimal? ReasoningCostUsd { get; init; }
+
     public decimal? CostUsd { get; init; }
 
     public IReadOnlyList<string> SystemLabels { get; init; } = [];
@@ -103,6 +113,14 @@ public sealed class TokenUsageSummaryDto
 
     public long TotalTokens { get; init; }
 
+    public decimal? InputCostUsd { get; init; }
+
+    public decimal? CachedInputCostUsd { get; init; }
+
+    public decimal? OutputCostUsd { get; init; }
+
+    public decimal? ReasoningCostUsd { get; init; }
+
     public decimal? CostUsd { get; init; }
 }
 
@@ -115,6 +133,14 @@ public sealed class ModelCatalogStatusDto
     public int PricingModelCount { get; init; }
 
     public int AliasCount { get; init; }
+
+    public string PricingCatalogUrl { get; init; } = string.Empty;
+
+    public string PricingCatalogCachePath { get; init; } = string.Empty;
+
+    public string PricingCatalogLastRefreshedAt { get; init; } = string.Empty;
+
+    public string PricingCatalogLastError { get; init; } = string.Empty;
 
     public bool OpenAiApiConfigured { get; init; }
 
@@ -157,6 +183,14 @@ public sealed class CostSummaryPeriodDto
     public long ReasoningOutputTokens { get; init; }
 
     public long TotalTokens { get; init; }
+
+    public decimal? InputCostUsd { get; init; }
+
+    public decimal? CachedInputCostUsd { get; init; }
+
+    public decimal? OutputCostUsd { get; init; }
+
+    public decimal? ReasoningCostUsd { get; init; }
 
     public decimal? CostUsd { get; init; }
 }
@@ -232,11 +266,21 @@ public sealed class SessionListResponse
     public string Root { get; init; } = string.Empty;
 
     public IReadOnlyList<SessionSummaryDto> Sessions { get; init; } = [];
+
+    public int TotalCount { get; init; }
+
+    public int Offset { get; init; }
+
+    public int Limit { get; init; }
+
+    public bool HasMore { get; init; }
 }
 
 public sealed class SessionDetailResponse
 {
     public SessionSummaryDto? Session { get; init; }
+
+    public string SessionVersion { get; init; } = string.Empty;
 
     public IReadOnlyList<SessionEventDto> Events { get; init; } = [];
 
@@ -245,6 +289,13 @@ public sealed class SessionDetailResponse
     public ExchangeRateDto? ExchangeRate { get; init; }
 
     public TokenUsageSummaryDto? Usage { get; init; }
+}
+
+public sealed class SessionVersionResponse
+{
+    public string Path { get; init; } = string.Empty;
+
+    public string SessionVersion { get; init; } = string.Empty;
 }
 
 public sealed class OkResponse

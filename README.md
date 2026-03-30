@@ -173,8 +173,8 @@ Releasesにある`app-framework-dependent`フォルダをダウンロード後�
 
 - ラベル情報とラベル紐付けは `.cache/label-store.json` に保存されます。
 - 表示件数は `.cache/viewer-settings.json` で変更できます。
-- 既定値は `session_list_max: 1000`、`session_events_max: 10000` です。
-- ファイルが無い場合は初回起動時に自動生成されます。
+- 既定値は `session_list_max: 1000`、`session_list_initial_load_count: 50`、`session_events_max: 10000` です。
+- ファイルが無い場合は初回起動時に自動生成され、不足している設定キーも既定値で補完されます。
 - Viewer はローカル専用で、既定では `http://127.0.0.1:8765` で待ち受けます。既定ポートが使用中の場合は、設定範囲内の次の空きポートにフォールバックします。
 
 ---
@@ -202,7 +202,7 @@ Releasesにある`app-framework-dependent`フォルダをダウンロード後�
 └── src/
     ├── .cache/
     │   ├── label-store.json           # ラベル定義と紐付けの保存先
-    │   └── viewer-settings.json       # 一覧件数と詳細イベント件数の設定
+    │   └── viewer-settings.json       # 一覧件数・初回段階ロード件数・詳細イベント件数の設定
     ├── CodexSessionsViewer.sln        # ソリューション
     ├── CodexSessionsViewer.csproj     # ASP.NET Core / Blazor プロジェクト定義
     ├── Program.cs                     # アプリ起動、URL設定、APIエンドポイント定義

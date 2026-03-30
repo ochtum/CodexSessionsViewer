@@ -10,6 +10,7 @@ const state = {
   activeUsage: null,
   activeExchangeRate: null,
   activeRawLineCount: 0,
+  activeSessionVersion: '',
   todayUsageSummary: null,
   todayUsageExchangeRate: null,
   isTodayUsageLoading: false,
@@ -18,7 +19,9 @@ const state = {
   sessionRoot: '',
   labels: [],
   isSessionsLoading: false,
+  isSessionsBackgroundLoading: false,
   hasLoadedSessions: false,
+  sessionsTotalCount: 0,
   sessionsError: '',
   sessionsLoadMode: '',
   isLabeledLoading: false,
@@ -38,6 +41,10 @@ const state = {
 const FILTER_STORAGE_KEY = 'codex_sessions_viewer_filters_v1';
 const LANGUAGE_STORAGE_KEY = 'codex_sessions_viewer_language_v1';
 const COST_CURRENCY_STORAGE_KEY = 'codex_sessions_viewer_cost_currency_v1';
+const COST_SUMMARY_CACHE_KEY = 'codex_sessions_viewer_cost_summary_cache_v1';
+const SESSION_BACKGROUND_APPEND_DELAY_MS = 80;
+const COST_SUMMARY_PRELOAD_INTERVAL_MS = 5 * 60 * 1000;
+const COST_SUMMARY_CACHE_MAX_AGE_MS = COST_SUMMARY_PRELOAD_INTERVAL_MS;
 const fpInstances = {};
 const segInstances = {};
 const FP_LOCALE_MAP = {
@@ -637,13 +644,17 @@ const I18N = {
     'common.date': '日付',
     'common.time': '時間',
     'filter.source': 'source',
+    'filter.subagents': 'subagents',
     'filter.sessionLabel': 'セッションラベル',
     'filter.eventLabel': 'イベントラベル',
     'filter.source.all': 'source: all',
     'filter.source.cli': 'source: CLI',
     'filter.source.vscode': 'source: VS Code',
+    'filter.subagents.all': '含む',
+    'filter.subagents.exclude': '含まない',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'session.badge.subagents': 'subagents',
     'filter.sort': '並び順',
     'filter.sort.desc': '新しい順',
     'filter.sort.asc': '古い順',
@@ -777,6 +788,9 @@ const I18N = {
     'status.sessions.emptyCopy': '読み込み対象ディレクトリに .jsonl セッションがあるか確認してください。',
     'status.sessions.refreshTitle': '一覧を更新中...',
     'status.sessions.refreshCopy': '最新のセッションを再取得しています。',
+    'status.sessions.backgroundTitle': '残りのセッションを読み込み中...',
+    'status.sessions.backgroundCopy': '操作は続けたまま、一覧を少しずつ追加しています。',
+    'status.sessions.backgroundInline': '追加読込中 {loaded} / {total}',
     'status.labels.loadingTitle': 'ラベルリストを読み込み中...',
     'status.labels.loadingCopy': 'ラベル付きのセッションとイベントを整理しています。',
     'status.labels.errorTitle': 'ラベルリストの取得に失敗しました',
@@ -857,13 +871,17 @@ const I18N = {
     'common.date': 'Date',
     'common.time': 'Time',
     'filter.source': 'Source',
+    'filter.subagents': 'Subagents',
     'filter.sessionLabel': 'Session label',
     'filter.eventLabel': 'Event label',
     'filter.source.all': 'source: all',
     'filter.source.cli': 'source: CLI',
     'filter.source.vscode': 'source: VS Code',
+    'filter.subagents.all': 'Include',
+    'filter.subagents.exclude': 'Exclude',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'session.badge.subagents': 'subagents',
     'filter.sort': 'Sort order',
     'filter.sort.desc': 'Newest first',
     'filter.sort.asc': 'Oldest first',
@@ -997,6 +1015,9 @@ const I18N = {
     'status.sessions.emptyCopy': 'Check whether the target directory contains .jsonl sessions.',
     'status.sessions.refreshTitle': 'Refreshing list...',
     'status.sessions.refreshCopy': 'Fetching the latest sessions again.',
+    'status.sessions.backgroundTitle': 'Loading more sessions...',
+    'status.sessions.backgroundCopy': 'The remaining sessions are being added in the background.',
+    'status.sessions.backgroundInline': 'Loading more {loaded} / {total}',
     'status.labels.loadingTitle': 'Loading labeled items...',
     'status.labels.loadingCopy': 'Collecting labeled sessions and events.',
     'status.labels.errorTitle': 'Failed to load the label list',
@@ -1077,13 +1098,17 @@ const I18N = {
     'common.date': '日期',
     'common.time': '时间',
     'filter.source': '来源',
+    'filter.subagents': 'Subagents',
     'filter.sessionLabel': '会话标签',
     'filter.eventLabel': '事件标签',
     'filter.source.all': 'source: all',
     'filter.source.cli': 'source: CLI',
     'filter.source.vscode': 'source: VS Code',
+    'filter.subagents.all': '包含',
+    'filter.subagents.exclude': '不包含',
     'filter.sessionLabel.all': 'session label: all',
     'filter.eventLabel.all': 'event label: all',
+    'session.badge.subagents': 'subagents',
     'filter.sort': '排序',
     'filter.sort.desc': '最新优先',
     'filter.sort.asc': '最旧优先',
@@ -1217,6 +1242,9 @@ const I18N = {
     'status.sessions.emptyCopy': '请确认目标目录中是否存在 .jsonl 会话文件。',
     'status.sessions.refreshTitle': '正在刷新列表...',
     'status.sessions.refreshCopy': '正在重新获取最新会话。',
+    'status.sessions.backgroundTitle': '正在继续加载其余会话...',
+    'status.sessions.backgroundCopy': '不会打断当前操作，列表会逐步追加。',
+    'status.sessions.backgroundInline': '继续加载 {loaded} / {total}',
     'status.labels.loadingTitle': '正在加载标签列表...',
     'status.labels.loadingCopy': '正在整理带标签的会话和事件。',
     'status.labels.errorTitle': '获取标签列表失败',
@@ -1287,7 +1315,11 @@ I18N['zh-Hant'] = {
   'common.date': '日期',
   'common.time': '時間',
   'filter.source': '來源',
+  'filter.subagents': 'Subagents',
   'filter.eventLabel': '事件標籤',
+  'filter.subagents.all': '包含',
+  'filter.subagents.exclude': '不包含',
+  'session.badge.subagents': 'subagents',
   'filter.sort': '排序',
   'filter.sort.desc': '最新優先',
   'filter.sort.asc': '最舊優先',
@@ -1409,6 +1441,9 @@ I18N['zh-Hant'] = {
   'status.sessions.emptyCopy': '請確認目標目錄中是否存在 .jsonl 工作階段檔案。',
   'status.sessions.refreshTitle': '正在刷新列表...',
   'status.sessions.refreshCopy': '正在重新取得最新工作階段。',
+  'status.sessions.backgroundTitle': '正在繼續載入其餘工作階段...',
+  'status.sessions.backgroundCopy': '不會打斷目前操作，列表會逐步追加。',
+  'status.sessions.backgroundInline': '繼續載入 {loaded} / {total}',
   'status.labels.loadingTitle': '正在載入標籤列表...',
   'status.labels.loadingCopy': '正在整理帶標籤的工作階段與事件。',
   'status.labels.errorTitle': '取得標籤列表失敗',
@@ -1583,6 +1618,7 @@ function applyMainLanguage(){
   setDateTimePairAria('event_date_from_date', 'event_date_from_time', t('filter.eventDateFrom'));
   setDateTimePairAria('event_date_to_date', 'event_date_to_time', t('filter.eventDateTo'));
   setFieldLabel('source_filter', t('filter.source'));
+  setFieldLabel('subagents_filter', t('filter.subagents'));
   setFieldLabel('session_label_filter', t('filter.sessionLabel'));
   setFieldLabel('event_label_filter', t('filter.eventLabel'));
   document.querySelectorAll('.sort-tab').forEach(tab => {
@@ -1597,6 +1633,8 @@ function applyMainLanguage(){
   setOptionText('source_filter', 0, t('filter.source.all'));
   setOptionText('source_filter', 1, t('filter.source.cli'));
   setOptionText('source_filter', 2, t('filter.source.vscode'));
+  setOptionText('subagents_filter', 0, t('filter.subagents.all'));
+  setOptionText('subagents_filter', 1, t('filter.subagents.exclude'));
   setText('.detail-toolbar-row.primary .detail-group-title', t('detail.display'));
   setToggleLabel('only_user_instruction', t('detail.toggle.user'));
   setToggleLabel('only_ai_response', t('detail.toggle.ai'));
@@ -1763,6 +1801,7 @@ let loadSessionsRequestSeq = 0;
 let loadSessionDetailRequestSeq = 0;
 let loadLabeledItemsRequestSeq = 0;
 let todayUsageSummaryRequestSeq = 0;
+let costSummaryRefreshTimer = 0;
 let saveFiltersFrame = 0;
 let deferredDetailSyncTimer = 0;
 let labelManagerWindow = null;
@@ -1805,6 +1844,77 @@ function renderInlineStatus(title, copy, tone){
   return `<div class="status-wrap">${buildStatusCard(title, copy, tone)}</div>`;
 }
 
+function scheduleBackgroundTask(callback, delayMs){
+  const delay = Number.isFinite(delayMs) ? Math.max(0, delayMs) : 0;
+  window.setTimeout(() => {
+    if(typeof window.requestIdleCallback === 'function'){
+      window.requestIdleCallback(() => callback(), { timeout: 1000 });
+      return;
+    }
+    callback();
+  }, delay);
+}
+
+function readCostSummaryCache(){
+  try {
+    const raw = localStorage.getItem(COST_SUMMARY_CACHE_KEY) || '';
+    if(!raw){
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if(!parsed || typeof parsed !== 'object' || !parsed.data){
+      return null;
+    }
+    const savedAt = Number(parsed.saved_at);
+    return {
+      data: parsed.data,
+      savedAt: Number.isFinite(savedAt) ? savedAt : 0,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeCostSummaryCache(data){
+  if(!data){
+    return;
+  }
+  try {
+    localStorage.setItem(COST_SUMMARY_CACHE_KEY, JSON.stringify({
+      saved_at: Date.now(),
+      data,
+    }));
+  } catch (error) {
+    // Ignore storage quota errors and keep the in-memory state only.
+  }
+}
+
+function isCostSummaryCacheFresh(entry){
+  return !!entry
+    && Number.isFinite(entry.savedAt)
+    && entry.savedAt > 0
+    && (Date.now() - entry.savedAt) <= COST_SUMMARY_CACHE_MAX_AGE_MS;
+}
+
+function setTodayUsageFromCostSummary(data){
+  state.todayUsageSummary = extractTodayUsageSummary(data);
+  state.todayUsageExchangeRate = data && data.exchange_rate ? data.exchange_rate : null;
+  state.hasTodayUsageLoaded = true;
+  state.todayUsageError = '';
+}
+
+function scheduleNextCostSummaryRefresh(delayMs){
+  if(costSummaryRefreshTimer){
+    clearTimeout(costSummaryRefreshTimer);
+  }
+  costSummaryRefreshTimer = window.setTimeout(() => {
+    costSummaryRefreshTimer = 0;
+    scheduleBackgroundTask(() => {
+      void loadTodayUsageSummary({ backgroundRefresh: true });
+    }, 0);
+  }, Math.max(0, delayMs));
+}
+
 function getUsageTooltipAlign(index, total){
   if(index === 0){
     return 'start';
@@ -1827,6 +1937,25 @@ function setStatusLayer(id, title, copy, tone){
   }
   layer.innerHTML = buildStatusCard(title, copy, tone);
   layer.classList.remove('hidden');
+}
+
+function updateSessionsBackgroundIndicator(){
+  const indicator = document.getElementById('sessions_background_indicator');
+  if(!indicator){
+    return;
+  }
+  if(state.isSessionsBackgroundLoading){
+    indicator.textContent = t('status.sessions.backgroundInline', {
+      loaded: formatNumber(state.sessions.length),
+      total: formatNumber(state.sessionsTotalCount || state.sessions.length),
+    });
+    indicator.setAttribute('title', t('status.sessions.backgroundCopy'));
+    indicator.classList.remove('hidden');
+    return;
+  }
+  indicator.textContent = '';
+  indicator.removeAttribute('title');
+  indicator.classList.add('hidden');
 }
 
 function updateReloadButtonState(){
@@ -2497,7 +2626,7 @@ function setDetailEventBodyExpanded(path, eventKey, expanded){
   }
 }
 
-function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta){
+function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta, projectedAssistantUsageByEventId){
   const role = ev.role || 'system';
   const roleLabel = role.replaceAll('_', ' ');
   const kindLabel = (ev.kind || 'event').replaceAll('_', ' ');
@@ -2507,7 +2636,9 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
   const eventKey = getDetailEventKey(ev, fallbackIndex);
   const bodyText = getEventBodyText(ev);
   const eventMatches = searchMeta && searchMeta.matchesByEvent ? (searchMeta.matchesByEvent.get(eventKey) || []) : [];
-  const bodyInner = `<pre>${renderHighlightedEventBody(bodyText, eventMatches)}</pre>`;
+  const bodyInner = ev && ev.kind === 'token_usage'
+    ? renderTokenUsageEventBodyHtml(ev)
+    : `<pre>${renderHighlightedEventBody(bodyText, eventMatches)}</pre>`;
   const body = `<div class="ev-body-wrap" data-event-key="${esc(eventKey)}">${bodyInner}<button class="ev-body-toggle">${esc(t('detail.bodyExpand'))}</button></div>`;
   const selectionKey = getEventSelectionKey(ev);
   const isSelectable = state.isEventSelectionMode && isSelectableMessageEvent(ev);
@@ -2525,7 +2656,19 @@ function buildEventCardHtml(ev, selectedEventLabelId, fallbackIndex, searchMeta)
     ? `<button class="event-copy-button" data-event-id="${esc(ev.event_id || '')}">${esc(t('copy.single'))}</button>`
     : '';
   const systemLabelsHtml = systemLabels.map(label => `<span class="badge-kind badge-system-label">${esc(label)}</span>`).join('');
-  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}" data-event-id="${esc(ev.event_id || '')}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(kindLabel)}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${body}</div>`;
+  const projectedUsage = ev
+    && ev.kind === 'message'
+    && ev.role === 'assistant'
+    && projectedAssistantUsageByEventId
+    ? projectedAssistantUsageByEventId.get(String(ev.event_id || '')) || null
+    : null;
+  const usageBadgesHtml = ev && ev.kind === 'token_usage'
+    ? renderTokenUsageBadges(ev)
+    : renderUsageBadges(projectedUsage);
+  const bodyWithUsage = usageBadgesHtml
+    ? `<div class="event-usage-row">${usageBadgesHtml}</div>${body}`
+    : body;
+  return `<div class="ev ${role} ${matchesSelectedLabel ? 'label-match' : ''} ${isSelected ? 'copy-selected' : ''} ${isRangeSelected ? 'range-anchor-selected' : ''}" data-event-id="${esc(ev.event_id || '')}"><div class="ev-head">${selectionCheckboxHtml}${rangeSelectionHtml}<span class="badge-kind">${esc(kindLabel)}</span><span class="badge-role ${role}">${esc(roleLabel)}</span><span class="badge-time">${esc(fmt(ev.timestamp))}</span>${systemLabelsHtml}<span class="event-actions">${labelsHtml}<button class="event-label-add-button" data-event-id="${esc(ev.event_id || '')}" ${state.labels.length ? '' : 'disabled'}>${esc(t('picker.addLabel'))}</button>${copyButtonHtml}</span></div>${bodyWithUsage}</div>`;
 }
 
 function attachVisibleEventCardHandlers(eventsBox, startIndex, endIndex){
@@ -2566,6 +2709,7 @@ const EVENT_RENDER_CHUNK_SIZE = 100;
 
 function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchMeta){
   cancelPendingChunkRender();
+  const projectedAssistantUsageByEventId = buildProjectedAssistantUsageMap(state.activeEvents || []);
   const targetMatch = searchMeta && pendingDetailKeywordFocusIndex >= 0
     ? searchMeta.matches[pendingDetailKeywordFocusIndex] || null
     : null;
@@ -2577,7 +2721,7 @@ function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchM
   const firstChunk = displayEvents.slice(0, EVENT_RENDER_FIRST_CHUNK);
   const remaining = displayEvents.slice(EVENT_RENDER_FIRST_CHUNK);
 
-  eventsBox.innerHTML = firstChunk.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index, searchMeta)).join('');
+  eventsBox.innerHTML = firstChunk.map((ev, index) => buildEventCardHtml(ev, selectedEventLabelId, index, searchMeta, projectedAssistantUsageByEventId)).join('');
   eventsBox.scrollTop = targetScrollTop;
   attachVisibleEventCardHandlers(eventsBox);
 
@@ -2590,7 +2734,7 @@ function renderEventList(eventsBox, displayEvents, selectedEventLabelId, searchM
       if(chunk.length === 0) return;
       const fragment = document.createDocumentFragment();
       const temp = document.createElement('div');
-      temp.innerHTML = chunk.map((ev, i) => buildEventCardHtml(ev, selectedEventLabelId, offset + i, searchMeta)).join('');
+      temp.innerHTML = chunk.map((ev, i) => buildEventCardHtml(ev, selectedEventLabelId, offset + i, searchMeta, projectedAssistantUsageByEventId)).join('');
       while(temp.firstChild) fragment.appendChild(temp.firstChild);
       eventsBox.appendChild(fragment);
       attachVisibleEventCardHandlers(eventsBox, offset, offset + chunk.length);
@@ -2705,6 +2849,38 @@ function normalizeSourceFilter(source){
   return normalizeSource(raw);
 }
 
+function normalizeSubagentsFilter(value){
+  const raw = (value || '').toLowerCase();
+  return raw === 'exclude' ? 'exclude' : 'include';
+}
+
+function hasSubagentsLabel(session){
+  if(session && session.is_subagent === true){
+    return true;
+  }
+  const candidates = [
+    session && session.path ? String(session.path) : '',
+    session && session.relative_path ? String(session.relative_path) : '',
+  ];
+  if(candidates.some(value => {
+    const normalized = String(value || '').toLowerCase();
+    return normalized.includes('/subagents/')
+      || normalized.includes('\\subagents\\')
+      || normalized.includes('/subagents\\')
+      || normalized.includes('\\subagents/');
+  })){
+    return true;
+  }
+  const source = String(session && session.source ? session.source : '').toLowerCase();
+  return source.includes('exec');
+}
+
+function renderSubagentsTag(session){
+  if(!hasSubagentsLabel(session)){
+    return '';
+  }
+  return '<div class="session-badge session-tag-subagents">' + esc(t('session.badge.subagents')) + '</div>';
+}
 function fmt(ts){
   if(!ts) return '';
   const d = new Date(ts);
@@ -2821,6 +2997,72 @@ function formatUsageCostDisplay(value, exchangeRate){
   return `${formatUsd(value)} / ${formattedLocal}`;
 }
 
+function formatUsageMetricWithCostDisplay(tokenValue, costUsd, exchangeRate){
+  const tokenCount = Number(tokenValue);
+  const normalizedTokenCount = Number.isFinite(tokenCount) ? tokenCount : 0;
+  const tokenText = formatNumber(normalizedTokenCount);
+  const numericCost = Number(costUsd);
+  if(Number.isFinite(numericCost)){
+    if(normalizedTokenCount > 0 || numericCost !== 0){
+      return `${tokenText} (${formatUsageCostDisplay(numericCost, exchangeRate)})`;
+    }
+    return tokenText;
+  }
+  if(normalizedTokenCount > 0){
+    return `${tokenText} (${t('usage.costUnknown')})`;
+  }
+  return tokenText;
+}
+
+function getUsageMetricDisplayParts(tokenValue, costUsd, exchangeRate){
+  const tokenCount = Number(tokenValue);
+  const normalizedTokenCount = Number.isFinite(tokenCount) ? tokenCount : 0;
+  const primaryText = formatNumber(normalizedTokenCount);
+  const numericCost = Number(costUsd);
+  const secondaryText = Number.isFinite(numericCost)
+    ? (normalizedTokenCount > 0 || numericCost !== 0 ? formatUsageCostDisplay(numericCost, exchangeRate) : '')
+    : (normalizedTokenCount > 0 ? t('usage.costUnknown') : '');
+  return {
+    primaryText,
+    secondaryText,
+  };
+}
+
+function renderPlainUsageMetricValueHtml(value){
+  return `<span class="usage-metric-primary">${esc(value)}</span>`;
+}
+
+function renderUsageMetricValueHtml(tokenValue, costUsd, exchangeRate){
+  const { primaryText, secondaryText } = getUsageMetricDisplayParts(tokenValue, costUsd, exchangeRate);
+  return `<span class="usage-metric-primary">${esc(primaryText)}</span>${secondaryText ? ` <span class="usage-metric-secondary">(${esc(secondaryText)})</span>` : ''}`;
+}
+
+function renderTokenUsageEventBodyHtml(ev){
+  const lines = [];
+  const performance = getUsageCostPerformance(ev.total_tokens || 0, ev.cost_usd);
+  const reasoningLevel = ev.reasoning_effort
+    ? stringifyEventBodyValue(ev.reasoning_effort)
+    : '';
+  if(ev.model){
+    const modelText = reasoningLevel
+      ? `${stringifyEventBodyValue(ev.model)} (${t('meta.reasoningLevel')}: ${reasoningLevel})`
+      : stringifyEventBodyValue(ev.model);
+    lines.push(`${esc(t('usage.model'))}: ${renderPlainUsageMetricValueHtml(modelText)}`);
+  } else if(reasoningLevel){
+    lines.push(`${esc(t('meta.reasoningLevel'))}: ${renderPlainUsageMetricValueHtml(reasoningLevel)}`);
+  }
+  lines.push(`${esc(t('usage.input'))}: ${renderUsageMetricValueHtml(ev.input_tokens, ev.input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.cached'))}: ${renderUsageMetricValueHtml(ev.cached_input_tokens, ev.cached_input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.output'))}: ${renderUsageMetricValueHtml(ev.output_tokens, ev.output_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.reasoning'))}: ${renderUsageMetricValueHtml(ev.reasoning_output_tokens, ev.reasoning_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${esc(t('usage.total'))}: ${renderPlainUsageMetricValueHtml(formatNumber(ev.total_tokens || 0))}`);
+  lines.push(`${esc(t('usage.cost'))}: ${renderPlainUsageMetricValueHtml(formatUsageCostDisplay(ev.cost_usd, state.activeExchangeRate))}`);
+  lines.push(`${esc(t('usage.perDollar'))}: ${renderPlainUsageMetricValueHtml(formatTokensPerDollar(ev.total_tokens || 0, ev.cost_usd) || '-')}`);
+  lines.push(`${esc(t('usage.score'))}: ${renderPlainUsageMetricValueHtml(formatUsageScoreDisplay(performance.score))}`);
+  lines.push(`${esc(t('usage.rank'))}: ${renderPlainUsageMetricValueHtml(performance.rank || '-')}`);
+  return `<pre class="token-usage-body">${lines.join('\n')}</pre>`;
+}
+
 function formatExchangeRateDisplay(exchangeRate){
   const currencyCode = getPreferredCostCurrencyCode();
   if(!exchangeRate || currencyCode === 'USD'){
@@ -2911,6 +3153,121 @@ function formatUsageScoreDisplay(value){
   return score.toFixed(2);
 }
 
+function buildUsageBadge(label, extraClass){
+  return `<span class="usage-badge${extraClass ? ` ${extraClass}` : ''}">${esc(label)}</span>`;
+}
+
+function hasUsageBadgeData(usage){
+  if(!usage){
+    return false;
+  }
+  return Number(usage.total_tokens || 0) > 0
+    || Number(usage.input_tokens || 0) > 0
+    || Number(usage.cached_input_tokens || 0) > 0
+    || Number(usage.output_tokens || 0) > 0
+    || Number(usage.reasoning_output_tokens || 0) > 0
+    || Number.isFinite(Number(usage.cost_usd));
+}
+
+function renderUsageBadges(usage){
+  if(!hasUsageBadgeData(usage)){
+    return '';
+  }
+  const badges = [];
+  if(Number(usage.total_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.total')} ${formatNumber(usage.total_tokens || 0)}`, 'usage-badge-strong'));
+  }
+  if(Number(usage.input_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.input')} ${formatNumber(usage.input_tokens || 0)}`));
+  }
+  if(Number(usage.cached_input_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.cached')} ${formatNumber(usage.cached_input_tokens || 0)}`));
+  }
+  if(Number(usage.output_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.output')} ${formatNumber(usage.output_tokens || 0)}`));
+  }
+  if(Number(usage.reasoning_output_tokens || 0) > 0){
+    badges.push(buildUsageBadge(`${t('usage.reasoning')} ${formatNumber(usage.reasoning_output_tokens || 0)}`));
+  }
+  if(Number.isFinite(Number(usage.cost_usd))){
+    badges.push(buildUsageBadge(`${t('usage.cost')} ${formatUsageCostDisplay(usage.cost_usd, state.activeExchangeRate)}`, 'usage-badge-cost'));
+  }
+  return badges.join('');
+}
+
+function renderTokenUsageBadges(ev){
+  return renderUsageBadges(ev);
+}
+
+function buildProjectedAssistantUsageMap(events){
+  const projected = new Map();
+  if(!Array.isArray(events) || events.length === 0){
+    return projected;
+  }
+
+  for(let index = 0; index < events.length; index++){
+    const ev = events[index];
+    if(!ev || ev.kind !== 'message' || ev.role !== 'assistant' || !ev.event_id){
+      continue;
+    }
+
+    let aggregate = null;
+    for(let nextIndex = index + 1; nextIndex < events.length; nextIndex++){
+      const candidate = events[nextIndex];
+      if(!candidate){
+        continue;
+      }
+      if(candidate.kind === 'message' && (candidate.role === 'assistant' || candidate.role === 'user' || candidate.role === 'user_context')){
+        break;
+      }
+      if(candidate.kind !== 'token_usage'){
+        continue;
+      }
+      if(!aggregate){
+        aggregate = {
+          input_tokens: 0,
+          cached_input_tokens: 0,
+          output_tokens: 0,
+          reasoning_output_tokens: 0,
+          total_tokens: 0,
+          cost_usd: 0,
+          has_known_cost: false,
+          has_unknown_cost: false,
+        };
+      }
+      aggregate.input_tokens += Number(candidate.input_tokens || 0);
+      aggregate.cached_input_tokens += Number(candidate.cached_input_tokens || 0);
+      aggregate.output_tokens += Number(candidate.output_tokens || 0);
+      aggregate.reasoning_output_tokens += Number(candidate.reasoning_output_tokens || 0);
+      aggregate.total_tokens += Number(candidate.total_tokens || 0);
+      if(Number.isFinite(Number(candidate.cost_usd))){
+        aggregate.cost_usd += Number(candidate.cost_usd);
+        aggregate.has_known_cost = true;
+      } else if(Number(candidate.total_tokens || 0) > 0){
+        aggregate.has_unknown_cost = true;
+      }
+    }
+
+    if(!aggregate){
+      continue;
+    }
+
+    const projectedUsage = {
+      input_tokens: aggregate.input_tokens,
+      cached_input_tokens: aggregate.cached_input_tokens,
+      output_tokens: aggregate.output_tokens,
+      reasoning_output_tokens: aggregate.reasoning_output_tokens,
+      total_tokens: aggregate.total_tokens,
+      cost_usd: aggregate.has_known_cost && !aggregate.has_unknown_cost ? aggregate.cost_usd : null,
+    };
+    if(hasUsageBadgeData(projectedUsage)){
+      projected.set(String(ev.event_id), projectedUsage);
+    }
+  }
+
+  return projected;
+}
+
 function extractTodayUsageSummary(costSummary){
   if(!costSummary || !Array.isArray(costSummary.groups)){
     return null;
@@ -2969,33 +3326,57 @@ function renderTodayUsageSummary(){
   container.innerHTML = `<div class="today-usage-card"><span class="today-usage-title">${esc(t('todayUsage.title'))}</span><div class="today-usage-items">${metrics.map(({ label, value, tooltip }, index) => `<span class="usage-metric" data-tooltip="${esc(tooltip)}" data-tooltip-align="${esc(getUsageTooltipAlign(index, metrics.length))}" tabindex="0" aria-label="${esc(`${label}: ${tooltip}`)}"><span class="meta-tag">${esc(`${label}:`)}</span><span class="header-meta-text usage-metric-value">${esc(value)}</span></span>`).join('')}</div></div>`;
 }
 
-async function loadTodayUsageSummary(){
+async function loadTodayUsageSummary(options){
+  const opts = options || {};
+  const cached = !opts.forceRefresh ? readCostSummaryCache() : null;
+  const hasCachedData = !!(cached && cached.data);
+  const hasExistingData = !!state.todayUsageSummary;
+
+  if(hasCachedData){
+    setTodayUsageFromCostSummary(cached.data);
+    state.isTodayUsageLoading = false;
+    renderTodayUsageSummary();
+  } else if(!opts.backgroundRefresh || !hasExistingData){
+    state.isTodayUsageLoading = true;
+    renderTodayUsageSummary();
+  }
+
+  const shouldFetchNow = !!opts.forceRefresh || !hasCachedData || !isCostSummaryCacheFresh(cached);
+  if(!shouldFetchNow){
+    scheduleNextCostSummaryRefresh(COST_SUMMARY_PRELOAD_INTERVAL_MS);
+    return;
+  }
+
   const requestId = ++todayUsageSummaryRequestSeq;
-  state.isTodayUsageLoading = true;
-  renderTodayUsageSummary();
   try {
-    const response = await fetch('/api/cost-summary?ts=' + Date.now(), { cache: 'no-store' });
+    const params = new URLSearchParams();
+    params.set('ts', Date.now().toString());
+    if(opts.forceRefresh){
+      params.set('force', '1');
+    }
+    const response = await fetch('/api/cost-summary?' + params.toString(), { cache: 'no-store' });
     const data = await response.json();
     if(requestId !== todayUsageSummaryRequestSeq){
       return;
     }
-    state.todayUsageSummary = extractTodayUsageSummary(data);
-    state.todayUsageExchangeRate = data.exchange_rate || null;
-    state.hasTodayUsageLoaded = true;
-    state.todayUsageError = '';
+    writeCostSummaryCache(data);
+    setTodayUsageFromCostSummary(data);
   } catch (error) {
     if(requestId !== todayUsageSummaryRequestSeq){
       return;
     }
-    state.hasTodayUsageLoaded = true;
-    state.todayUsageExchangeRate = null;
-    state.todayUsageError = normalizeRequestError(error, t('todayUsage.error'));
+    if(!hasCachedData && !hasExistingData){
+      state.hasTodayUsageLoaded = true;
+      state.todayUsageExchangeRate = null;
+      state.todayUsageError = normalizeRequestError(error, t('todayUsage.error'));
+    }
   } finally {
     if(requestId !== todayUsageSummaryRequestSeq){
       return;
     }
     state.isTodayUsageLoading = false;
     renderTodayUsageSummary();
+    scheduleNextCostSummaryRefresh(COST_SUMMARY_PRELOAD_INTERVAL_MS);
   }
 }
 
@@ -3703,12 +4084,13 @@ function formatTokenUsageEventBody(ev){
   } else if(reasoningLevel){
     lines.push(`${t('meta.reasoningLevel')}: ${reasoningLevel}`);
   }
-  lines.push(`${t('usage.input')}: ${formatNumber(ev.input_tokens || 0)}`);
-  lines.push(`${t('usage.cached')}: ${formatNumber(ev.cached_input_tokens || 0)}`);
-  lines.push(`${t('usage.output')}: ${formatNumber(ev.output_tokens || 0)}`);
-  lines.push(`${t('usage.reasoning')}: ${formatNumber(ev.reasoning_output_tokens || 0)}`);
+  lines.push(`${t('usage.input')}: ${formatUsageMetricWithCostDisplay(ev.input_tokens, ev.input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.cached')}: ${formatUsageMetricWithCostDisplay(ev.cached_input_tokens, ev.cached_input_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.output')}: ${formatUsageMetricWithCostDisplay(ev.output_tokens, ev.output_cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.reasoning')}: ${formatUsageMetricWithCostDisplay(ev.reasoning_output_tokens, ev.reasoning_cost_usd, state.activeExchangeRate)}`);
   lines.push(`${t('usage.total')}: ${formatNumber(ev.total_tokens || 0)}`);
   lines.push(`${t('usage.cost')}: ${formatUsageCostDisplay(ev.cost_usd, state.activeExchangeRate)}`);
+  lines.push(`${t('usage.perDollar')}: ${formatTokensPerDollar(ev.total_tokens || 0, ev.cost_usd) || '-'}`);
   lines.push(`${t('usage.score')}: ${formatUsageScoreDisplay(performance.score)}`);
   lines.push(`${t('usage.rank')}: ${performance.rank || '-'}`);
   return lines.join('\n');
@@ -4103,42 +4485,47 @@ function renderUsageMetaRows(usage){
   const metrics = [
     {
       label: t('usage.input'),
-      value: formatNumber(usage.input_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.input_tokens, usage.input_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.input'),
     },
     {
       label: t('usage.cached'),
-      value: formatNumber(usage.cached_input_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.cached_input_tokens, usage.cached_input_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.cached'),
     },
     {
       label: t('usage.output'),
-      value: formatNumber(usage.output_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.output_tokens, usage.output_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.output'),
     },
     {
       label: t('usage.reasoning'),
-      value: formatNumber(usage.reasoning_output_tokens || 0),
+      valueHtml: renderUsageMetricValueHtml(usage.reasoning_output_tokens, usage.reasoning_cost_usd, state.activeExchangeRate),
       tooltip: t('usage.tooltip.reasoning'),
     },
     {
       label: t('usage.total'),
-      value: formatNumber(usage.total_tokens || 0),
+      valueHtml: renderPlainUsageMetricValueHtml(formatNumber(usage.total_tokens || 0)),
       tooltip: t('usage.tooltip.total'),
     },
     {
       label: t('usage.cost'),
-      value: formatUsageCostDisplay(usage.cost_usd, state.activeExchangeRate),
+      valueHtml: renderPlainUsageMetricValueHtml(formatUsageCostDisplay(usage.cost_usd, state.activeExchangeRate)),
       tooltip: t('usage.tooltip.cost'),
     },
     {
+      label: t('usage.perDollar'),
+      valueHtml: renderPlainUsageMetricValueHtml(formatTokensPerDollar(usage.total_tokens || 0, usage.cost_usd) || '-'),
+      tooltip: t('usage.tooltip.perDollar'),
+    },
+    {
       label: t('usage.score'),
-      value: formatUsageScoreDisplay(performance.score),
+      valueHtml: renderPlainUsageMetricValueHtml(formatUsageScoreDisplay(performance.score)),
       tooltip: t('usage.tooltip.score'),
     },
     {
       label: t('usage.rank'),
-      value: performance.rank || '-',
+      valueHtml: renderPlainUsageMetricValueHtml(performance.rank || '-'),
       tooltip: t('usage.tooltip.rank'),
     },
   ];
@@ -4146,7 +4533,7 @@ function renderUsageMetaRows(usage){
   const reasoningLevel = state.activeSession && state.activeSession.reasoning_effort
     ? String(state.activeSession.reasoning_effort).trim()
     : '';
-  const usageRow = `<div class="header-meta-row"><span class="header-meta-label">${esc(t('meta.usage'))}</span><div class="usage-meta-items">${metrics.map(({ label, value, tooltip }, index) => `<span class="usage-metric" data-tooltip="${esc(tooltip)}" data-tooltip-align="${esc(getUsageTooltipAlign(index, metrics.length))}" tabindex="0" aria-label="${esc(`${label}: ${tooltip}`)}"><span class="meta-tag">${esc(`${label}:`)}</span><span class="header-meta-text usage-metric-value">${esc(value)}</span></span>`).join('')}</div></div>`;
+  const usageRow = `<div class="header-meta-row"><span class="header-meta-label">${esc(t('meta.usage'))}</span><div class="usage-meta-items">${metrics.map(({ label, valueHtml, tooltip }, index) => `<span class="usage-metric" data-tooltip="${esc(tooltip)}" data-tooltip-align="${esc(getUsageTooltipAlign(index, metrics.length))}" tabindex="0" aria-label="${esc(`${label}: ${tooltip}`)}"><span class="meta-tag">${esc(`${label}:`)}</span><span class="header-meta-text usage-metric-value">${valueHtml}</span></span>`).join('')}</div></div>`;
   let modelsRow = '';
   if(models.length){
     const reasoningTag = reasoningLevel
@@ -4314,6 +4701,7 @@ function hasListFilter(){
     document.getElementById('event_date_to_time').value ||
     document.getElementById('q').value.trim() ||
     normalizeSourceFilter(document.getElementById('source_filter').value || 'all') !== 'all' ||
+    normalizeSubagentsFilter(document.getElementById('subagents_filter')?.value || 'include') !== 'include' ||
     getSelectedSessionLabelFilter() ||
     getSelectedListEventLabelFilter()
   );
@@ -4350,6 +4738,12 @@ function normalizeRequestError(error, fallback){
   return fallback;
 }
 
+async function fetchSessionVersion(path){
+  const url = '/api/session-version?path=' + encodeURIComponent(path) + '&ts=' + Date.now();
+  const response = await fetch(url, { cache: 'no-store' });
+  return await response.json();
+}
+
 function getActiveSortOrder(){
   const active = document.querySelector('.sort-tab.active');
   return active ? active.dataset.sort : 'desc';
@@ -4363,32 +4757,184 @@ function setActiveSortOrder(value){
   });
 }
 
+function shouldUseProgressiveInitialSessionLoad(loadMode){
+  return loadMode === 'initial';
+}
+
+function buildSessionListRequestParams(options){
+  const opts = options || {};
+  const params = new URLSearchParams();
+  params.set('ts', Date.now().toString());
+
+  if(typeof opts.offset === 'number' && Number.isFinite(opts.offset) && opts.offset >= 0){
+    params.set('offset', String(opts.offset));
+  }
+
+  if(typeof opts.limit === 'number' && Number.isFinite(opts.limit) && opts.limit > 0){
+    params.set('limit', String(opts.limit));
+  }
+
+  const q = typeof opts.q === 'string' ? opts.q.trim() : '';
+  if(q){
+    params.set('q', q);
+    params.set('mode', opts.searchMode === 'or' ? 'or' : 'and');
+  }
+
+  if(opts.sessionLabelId){
+    params.set('session_label_id', opts.sessionLabelId);
+  }
+
+  if(opts.eventLabelId){
+    params.set('event_label_id', opts.eventLabelId);
+  }
+
+  if(opts.sortOrder && opts.sortOrder !== 'desc'){
+    params.set('sort', opts.sortOrder);
+  }
+
+  if(opts.force){
+    params.set('force', '1');
+  }
+
+  return params;
+}
+
+function shouldUseFilteredSessionsEndpoint(q, sessionLabelId, eventLabelId){
+  return !!(q || sessionLabelId || eventLabelId);
+}
+
+function getSessionListTotalCount(data, fallbackCount){
+  const totalCount = Number(data && data.total_count);
+  return Number.isFinite(totalCount) && totalCount >= 0 ? totalCount : fallbackCount;
+}
+
+function appendLoadedSessions(sessions){
+  const previousFilteredCount = state.filtered.length;
+  state.sessions = state.sessions.concat(sessions);
+  const filters = getSessionListFilterState();
+  const appendedFiltered = sessions.filter(session => matchesSessionListFilters(session, filters));
+  state.filtered = state.filtered.concat(appendedFiltered);
+  renderSessionList({ appendSessions: appendedFiltered, previousFilteredCount });
+}
+
+async function fetchSessionListChunk(requestId, requestOptions, offset){
+  const params = buildSessionListRequestParams({
+    q: requestOptions.q,
+    searchMode: requestOptions.searchMode,
+    sessionLabelId: requestOptions.sessionLabelId,
+    eventLabelId: requestOptions.eventLabelId,
+    sortOrder: requestOptions.sortOrder,
+    offset,
+  });
+  const endpoint = shouldUseFilteredSessionsEndpoint(
+    requestOptions.q,
+    requestOptions.sessionLabelId,
+    requestOptions.eventLabelId
+  ) ? '/api/sessions' : '/api/sessions-lite';
+  const response = await fetch(endpoint + '?' + params.toString(), { cache: 'no-store' });
+  const data = await response.json();
+  if(requestId !== loadSessionsRequestSeq){
+    return null;
+  }
+  return data;
+}
+
+async function loadSessionsProgressively(requestId, requestOptions){
+  const firstData = await fetchSessionListChunk(requestId, requestOptions, 0);
+  if(!firstData){
+    return;
+  }
+
+  state.sessions = Array.isArray(firstData.sessions) ? firstData.sessions : [];
+  state.sessionsTotalCount = getSessionListTotalCount(firstData, state.sessions.length);
+  state.sessionRoot = firstData.root || '';
+  state.hasLoadedSessions = true;
+  state.isSessionsLoading = false;
+  applyFilter();
+
+  let offset = state.sessions.length;
+  let hasMore = !!firstData.has_more && offset < state.sessionsTotalCount;
+  state.isSessionsBackgroundLoading = hasMore;
+  renderSessionList();
+
+  while(hasMore){
+    await new Promise(resolve => scheduleBackgroundTask(resolve, SESSION_BACKGROUND_APPEND_DELAY_MS));
+    if(requestId !== loadSessionsRequestSeq){
+      return;
+    }
+
+    const nextData = await fetchSessionListChunk(requestId, requestOptions, offset);
+    if(!nextData){
+      return;
+    }
+
+    const nextSessions = Array.isArray(nextData.sessions) ? nextData.sessions : [];
+    if(nextSessions.length === 0){
+      hasMore = false;
+      break;
+    }
+
+    state.sessionRoot = nextData.root || state.sessionRoot;
+    state.sessionsTotalCount = getSessionListTotalCount(nextData, state.sessions.length + nextSessions.length);
+    appendLoadedSessions(nextSessions);
+    offset += nextSessions.length;
+    hasMore = !!nextData.has_more && offset < state.sessionsTotalCount;
+    state.isSessionsBackgroundLoading = hasMore;
+    renderSessionList();
+  }
+}
+
 async function loadSessions(options){
   saveFilters();
   const requestId = ++loadSessionsRequestSeq;
   const loadMode = options && options.mode ? options.mode : 'auto';
   state.isSessionsLoading = true;
+  state.isSessionsBackgroundLoading = false;
   state.sessionsError = '';
   state.sessionsLoadMode = loadMode;
   renderSessionList();
-  const params = new URLSearchParams();
-  params.set('ts', Date.now().toString());
   const q = document.getElementById('q').value.trim();
-  if(q){
-    params.set('q', q);
-    params.set('mode', document.getElementById('mode').value);
-  }
+  const searchMode = document.getElementById('mode').value;
   const sessionLabelId = getSelectedSessionLabelFilter();
   const eventLabelId = getSelectedListEventLabelFilter();
-  if(sessionLabelId){
-    params.set('session_label_id', sessionLabelId);
-  }
-  if(eventLabelId){
-    params.set('event_label_id', eventLabelId);
-  }
   const sortOrder = getActiveSortOrder();
-  if(sortOrder && sortOrder !== 'desc'){
-    params.set('sort', sortOrder);
+  const params = buildSessionListRequestParams({
+    q,
+    searchMode,
+    sessionLabelId,
+    eventLabelId,
+    sortOrder,
+    force: loadMode === 'reload' || loadMode === 'reload_refresh',
+  });
+  if(shouldUseProgressiveInitialSessionLoad(loadMode)){
+    state.sessions = [];
+    state.filtered = [];
+    state.sessionsTotalCount = 0;
+    renderSessionList();
+    try {
+      await loadSessionsProgressively(requestId, {
+        q,
+        searchMode,
+        sessionLabelId,
+        eventLabelId,
+        sortOrder,
+      });
+    } catch (error) {
+      if(requestId !== loadSessionsRequestSeq){
+        return;
+      }
+      state.sessionsError = normalizeRequestError(error, t('error.sessions'));
+      renderSessionList();
+    } finally {
+      if(requestId === loadSessionsRequestSeq){
+        state.isSessionsLoading = false;
+        state.isSessionsBackgroundLoading = false;
+        state.hasLoadedSessions = true;
+        state.sessionsLoadMode = '';
+        renderSessionList();
+      }
+    }
+    return;
   }
   try {
     const r = await fetch('/api/sessions?' + params.toString(), { cache: 'no-store' });
@@ -4397,6 +4943,7 @@ async function loadSessions(options){
       return;
     }
     state.sessions = Array.isArray(data.sessions) ? data.sessions : [];
+    state.sessionsTotalCount = state.sessions.length;
     state.sessionsError = data.error || '';
     state.sessionRoot = data.root || '';
     applyFilter();
@@ -4426,6 +4973,7 @@ async function loadSessions(options){
         state.activeUsage = null;
         state.activeExchangeRate = null;
         state.activeRawLineCount = 0;
+        state.activeSessionVersion = '';
         state.detailError = '';
         state.detailLoadMode = '';
         clearSelectedEventIds();
@@ -4514,6 +5062,7 @@ function saveFilters(){
     q: document.getElementById('q').value,
     mode: document.getElementById('mode').value,
     source_filter: document.getElementById('source_filter').value,
+    subagents_filter: normalizeSubagentsFilter(document.getElementById('subagents_filter')?.value || 'include'),
     sort_order: getActiveSortOrder(),
     session_label_filter: getSelectedSessionLabelFilter(),
     event_label_filter: getSelectedListEventLabelFilter(),
@@ -4559,6 +5108,7 @@ function restoreFilters(){
     if(data.mode === 'and' || data.mode === 'or') document.getElementById('mode').value = data.mode;
     const source = normalizeSourceFilter(data.source_filter || 'all');
     document.getElementById('source_filter').value = source;
+    document.getElementById('subagents_filter').value = normalizeSubagentsFilter(data.subagents_filter || 'include');
     if(data.sort_order === 'asc' || data.sort_order === 'desc' || data.sort_order === 'updated') setActiveSortOrder(data.sort_order);
     if(typeof data.session_label_filter === 'string') document.getElementById('session_label_filter').dataset.pendingValue = data.session_label_filter;
     if(typeof data.event_label_filter === 'string') document.getElementById('event_label_filter').dataset.pendingValue = data.event_label_filter;
@@ -4592,6 +5142,7 @@ function clearFilters(){
   document.getElementById('q').value = '';
   document.getElementById('mode').value = 'and';
   document.getElementById('source_filter').value = 'all';
+  document.getElementById('subagents_filter').value = 'include';
   setActiveSortOrder('desc');
   document.getElementById('session_label_filter').value = '';
   document.getElementById('event_label_filter').value = '';
@@ -4608,13 +5159,9 @@ function clearFilters(){
   loadSessions({ mode: 'clear' });
 }
 
-function applyFilter(){
-  const cwdQ = document.getElementById('cwd_q').value.toLowerCase().trim();
-  const sourceFilter = normalizeSourceFilter(document.getElementById('source_filter').value || 'all');
+function getSessionListFilterState(){
   const fromRaw = getFpDateValue('date_from');
   const toRaw = getFpDateValue('date_to');
-  const fromTs = parseOptionalDateStart(fromRaw);
-  const toTs = parseOptionalDateEnd(toRaw);
   const evFromRaw = buildDateTimeIsoFromParts(
     getFpDateValue('event_date_from_date'),
     document.getElementById('event_date_from_time').value,
@@ -4625,45 +5172,59 @@ function applyFilter(){
     document.getElementById('event_date_to_time').value,
     'end'
   );
-  const evFromTs = parseOptionalDatetimeStart(evFromRaw);
-  const evToTs = parseOptionalDatetimeEnd(evToRaw);
-  state.filtered = state.sessions.filter(s => {
-    const cwdMatched = !cwdQ || (s.cwd || '').toLowerCase().includes(cwdQ);
-    const sourceMatched = sourceFilter === 'all' || normalizeSource(s.source) === sourceFilter;
+  return {
+    cwdQ: document.getElementById('cwd_q').value.toLowerCase().trim(),
+    sourceFilter: normalizeSourceFilter(document.getElementById('source_filter').value || 'all'),
+    fromTs: parseOptionalDateStart(fromRaw),
+    toTs: parseOptionalDateEnd(toRaw),
+    evFromTs: parseOptionalDatetimeStart(evFromRaw),
+    evToTs: parseOptionalDatetimeEnd(evToRaw),
+    subagentsFilter: normalizeSubagentsFilter(document.getElementById('subagents_filter')?.value || 'include'),
+  };
+}
 
-    let dateMatched = true;
-    if(fromTs !== null || toTs !== null){
-      const sessionTs = toTimestamp(s.started_at || s.mtime);
-      if(Number.isNaN(sessionTs)){
+function matchesSessionListFilters(session, filters){
+  const cwdMatched = !filters.cwdQ || (session.cwd || '').toLowerCase().includes(filters.cwdQ);
+  const sourceMatched = filters.sourceFilter === 'all' || normalizeSource(session.source) === filters.sourceFilter;
+  const subagentsMatched = filters.subagentsFilter === 'exclude' ? !hasSubagentsLabel(session) : true;
+
+  let dateMatched = true;
+  if(filters.fromTs !== null || filters.toTs !== null){
+    const sessionTs = toTimestamp(session.started_at || session.mtime);
+    if(Number.isNaN(sessionTs)){
+      dateMatched = false;
+    } else {
+      if(filters.fromTs !== null && sessionTs < filters.fromTs){
         dateMatched = false;
-      } else {
-        if(fromTs !== null && sessionTs < fromTs){
-          dateMatched = false;
-        }
-        if(toTs !== null && sessionTs > toTs){
-          dateMatched = false;
-        }
+      }
+      if(filters.toTs !== null && sessionTs > filters.toTs){
+        dateMatched = false;
       }
     }
+  }
 
-    let eventDateMatched = true;
-    if(evFromTs !== null || evToTs !== null){
-      const minTs = s.min_event_ts ? toTimestamp(s.min_event_ts) : NaN;
-      const maxTs = s.max_event_ts ? toTimestamp(s.max_event_ts) : NaN;
-      if(Number.isNaN(minTs) || Number.isNaN(maxTs)){
+  let eventDateMatched = true;
+  if(filters.evFromTs !== null || filters.evToTs !== null){
+    const minTs = session.min_event_ts ? toTimestamp(session.min_event_ts) : NaN;
+    const maxTs = session.max_event_ts ? toTimestamp(session.max_event_ts) : NaN;
+    if(Number.isNaN(minTs) || Number.isNaN(maxTs)){
+      eventDateMatched = false;
+    } else {
+      if(filters.evFromTs !== null && maxTs < filters.evFromTs){
         eventDateMatched = false;
-      } else {
-        if(evFromTs !== null && maxTs < evFromTs){
-          eventDateMatched = false;
-        }
-        if(evToTs !== null && minTs > evToTs){
-          eventDateMatched = false;
-        }
+      }
+      if(filters.evToTs !== null && minTs > filters.evToTs){
+        eventDateMatched = false;
       }
     }
+  }
 
-    return cwdMatched && sourceMatched && dateMatched && eventDateMatched;
-  });
+  return cwdMatched && sourceMatched && subagentsMatched && dateMatched && eventDateMatched;
+}
+
+function applyFilter(){
+  const filters = getSessionListFilterState();
+  state.filtered = state.sessions.filter(session => matchesSessionListFilters(session, filters));
   saveFilters();
   renderSessionList();
 }
@@ -4680,6 +5241,7 @@ function renderSessionCard(session, options){
         <div class="session-meta-row session-meta-row-primary">
           <div class="session-badge session-time">${esc(fmt(session.started_at || session.mtime))}</div>
           <div class="session-badge session-source source-${esc(normalizeSource(session.source))}">${esc(sourceLabel(session.source))}</div>
+          ${renderSubagentsTag(session)}
         </div>
         <div class="session-preview">${esc(session.first_real_user_text || session.first_user_text || t('session.preview.empty'))}</div>
         ${(session.session_label_ids || session.session_labels || []).length ? `<div class="session-label-row">${renderAssignedLabels(session.session_labels && session.session_labels.length ? session.session_labels : resolveLabelsById(session.session_label_ids))}</div>` : ''}
@@ -4713,6 +5275,7 @@ function renderLabeledSessionCard(session){
         <span class="labeled-item-badge type-session">${esc(t('labelsPane.item.session'))}</span>
         <div class="session-badge session-time">${esc(fmt(session.started_at || session.mtime))}</div>
         <div class="session-badge session-source source-${esc(normalizeSource(session.source))}">${esc(sourceLabel(session.source))}</div>
+        ${renderSubagentsTag(session)}
       </div>
       <div class="labeled-item-row">
         <div class="session-badge session-cwd">${esc(session.cwd || '-')}</div>
@@ -4764,8 +5327,12 @@ function renderLabeledGroup(title, count, cardsHtml){
   `;
 }
 
-function renderSessionList(){
+function renderSessionList(options){
+  const opts = options || {};
+  const appendSessions = Array.isArray(opts.appendSessions) ? opts.appendSessions : null;
+  const previousFilteredCount = Number.isFinite(opts.previousFilteredCount) ? opts.previousFilteredCount : 0;
   const box = document.getElementById('sessions');
+  const previousScrollTop = box ? box.scrollTop : 0;
   updateReloadButtonState();
   if(state.isSessionsLoading && !state.hasLoadedSessions){
     box.innerHTML = renderInlineStatus(
@@ -4788,12 +5355,22 @@ function renderSessionList(){
         )
       : renderInlineStatus(
           t('status.sessions.emptyTitle'),
-          t('status.sessions.emptyCopy'),
-          'empty'
-        );
+      t('status.sessions.emptyCopy'),
+      'empty'
+    );
+  } else if(appendSessions && (appendSessions.length > 0 || previousFilteredCount > 0)){
+    if(previousFilteredCount === 0){
+      box.innerHTML = appendSessions.map(s => renderSessionCard(s, { active: state.activePath === s.path })).join('');
+    } else if(appendSessions.length > 0){
+      box.insertAdjacentHTML('beforeend', appendSessions.map(s => renderSessionCard(s, { active: state.activePath === s.path })).join(''));
+    }
   } else {
     box.innerHTML = state.filtered.map(s => renderSessionCard(s, { active: state.activePath === s.path })).join('');
   }
+  if(box){
+    box.scrollTop = previousScrollTop;
+  }
+  updateSessionsBackgroundIndicator();
   if(state.isSessionsLoading && state.hasLoadedSessions && (state.sessionsLoadMode === 'reload' || state.sessionsLoadMode === 'reload_refresh' || state.sessionsLoadMode === 'auto' || state.sessionsLoadMode === 'clear')){
     setStatusLayer(
       'sessions_status',
@@ -4806,10 +5383,11 @@ function renderSessionList(){
   }
   const countEl = document.getElementById('session_count');
   if(countEl){
-    if(state.hasLoadedSessions && state.sessions.length > 0){
+    if(state.hasLoadedSessions && (state.sessions.length > 0 || state.sessionsTotalCount > 0)){
       const currentIndex = state.activePath ? state.filtered.findIndex(s => s.path === state.activePath) : -1;
       const currentLabel = currentIndex >= 0 ? String(currentIndex + 1) : '-';
-      countEl.textContent = t('summary.sessions', { current: currentLabel, filtered: state.filtered.length, total: state.sessions.length });
+      const totalCount = state.sessionsTotalCount || state.sessions.length;
+      countEl.textContent = t('summary.sessions', { current: currentLabel, filtered: state.filtered.length, total: totalCount });
     } else {
       countEl.textContent = '';
     }
@@ -5336,6 +5914,10 @@ async function openSession(path, options){
   const nextSession = state.sessions.find(s => s.path === path) || null;
   const previousPath = state.activeSession && state.activeSession.path ? state.activeSession.path : state.activePath;
   const loadMode = options && options.mode ? options.mode : 'open';
+  const canCheckVersionFirst = previousPath === path
+    && state.activeEvents.length > 0
+    && !!state.activeSessionVersion
+    && (loadMode === 'open' || loadMode === 'refresh' || loadMode === 'sync');
   if(!(options && options.preserveLabeledFocus)){
     pendingLabeledEventFocusId = '';
   }
@@ -5343,25 +5925,51 @@ async function openSession(path, options){
     pendingAutomaticDetailSync = false;
     clearDeferredDetailSyncTimer();
   }
-  state.activePath = path;
-  state.isDetailLoading = true;
-  state.detailError = '';
-  state.detailLoadMode = loadMode;
   if(nextSession){
-    state.activeSession = nextSession;
+    state.activeSession = {
+      ...(state.activeSession || {}),
+      ...nextSession,
+    };
   }
+  state.activePath = path;
   if(!state.activeSession || state.activeSession.path !== path){
     state.activeSession = nextSession;
   }
+  if(canCheckVersionFirst){
+    renderSessionList();
+    renderLabeledList();
+    renderActiveSession();
+    try {
+      const versionData = await fetchSessionVersion(path);
+      if(requestId !== loadSessionDetailRequestSeq) return;
+      if(!versionData.error && versionData.session_version && versionData.session_version === state.activeSessionVersion){
+        state.detailError = '';
+        renderSessionList();
+        renderActiveSession();
+        return;
+      }
+    } catch (error) {
+      if(requestId !== loadSessionDetailRequestSeq){
+        return;
+      }
+      // Fall through to the full refresh path when version check fails.
+    }
+  }
+  const effectiveLoadMode = canCheckVersionFirst ? 'refresh' : loadMode;
+  state.isDetailLoading = true;
+  state.detailError = '';
+  state.detailLoadMode = effectiveLoadMode;
   if(previousPath !== path){
     setActiveEvents([]);
     state.activeUsage = null;
     state.activeExchangeRate = null;
     state.activeRawLineCount = 0;
+    state.activeSessionVersion = '';
     clearSelectedEventIds();
     clearMessageRangeSelection();
   }
   renderSessionList();
+  renderLabeledList();
   renderActiveSession();
   try {
     const metaUrl = '/api/session?path=' + encodeURIComponent(path) + '&include_events=false&ts=' + Date.now();
@@ -5374,6 +5982,7 @@ async function openSession(path, options){
       return;
     }
     state.activeSession = metaData.session || nextSession;
+    state.activeSessionVersion = metaData.session_version || state.activeSessionVersion;
     state.activeUsage = metaData.usage || state.activeUsage;
     state.activeExchangeRate = metaData.exchange_rate || state.activeExchangeRate;
     state.detailError = '';
@@ -5389,6 +5998,7 @@ async function openSession(path, options){
       return;
     }
     state.activeSession = eventsData.session || state.activeSession;
+    state.activeSessionVersion = eventsData.session_version || state.activeSessionVersion;
     setActiveEvents(eventsData.events || []);
     state.activeUsage = eventsData.usage || null;
     state.activeExchangeRate = eventsData.exchange_rate || null;
@@ -5413,7 +6023,7 @@ async function openSession(path, options){
 async function refreshActiveSession(){
   if(!state.activePath) return;
   await openSession(state.activePath, { mode: 'refresh' });
-  await loadTodayUsageSummary();
+  await loadTodayUsageSummary({ forceRefresh: true });
 }
 
 function isEditableTarget(target){
@@ -5560,7 +6170,7 @@ async function triggerViewerRefresh(){
     if(state.activePath){
       await openSession(state.activePath, { mode: 'refresh' });
     }
-    await loadTodayUsageSummary();
+    await loadTodayUsageSummary({ forceRefresh: true });
     return;
   }
   const loadMode = state.activePath ? 'reload_refresh' : 'reload';
@@ -5568,7 +6178,7 @@ async function triggerViewerRefresh(){
   if(loadMode === 'reload_refresh' && state.activePath){
     await openSession(state.activePath, { mode: 'refresh' });
   }
-  await loadTodayUsageSummary();
+  await loadTodayUsageSummary({ forceRefresh: true });
 }
 
 function moveDetailKeywordSearchByShortcut(step){
@@ -5686,6 +6296,7 @@ function initViewerPage(){
   safeBindById('q', 'input', scheduleLoadSessions);
   safeBindById('mode', 'change', scheduleLoadSessions);
   safeBindById('source_filter', 'change', applyFilter);
+  safeBindById('subagents_filter', 'change', applyFilter);
   document.querySelectorAll('.sort-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       setActiveSortOrder(tab.dataset.sort);
@@ -6094,6 +6705,15 @@ function initViewerPage(){
       const nextCurrency = normalizeCostCurrency(event.newValue || '') || getDefaultCostCurrencyForLanguage(uiLanguage);
       if(nextCurrency !== getPreferredCostCurrencyCode()){
         setCostCurrency(nextCurrency, false);
+      }
+      return;
+    }
+    if(event.key === COST_SUMMARY_CACHE_KEY){
+      const cached = readCostSummaryCache();
+      if(cached && cached.data){
+        setTodayUsageFromCostSummary(cached.data);
+        state.isTodayUsageLoading = false;
+        renderTodayUsageSummary();
       }
     }
   });

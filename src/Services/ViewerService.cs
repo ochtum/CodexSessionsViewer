@@ -11,7 +11,10 @@ namespace CodexSessionsViewer.Services;
 public sealed partial class ViewerService
 {
     private const int SearchTextLimit = 50_000;
-    private const int MaxCacheEntries = 500;
+    // Keep enough index/event cache entries for large session sets to avoid frequent rebuild churn.
+    private const int MaxCacheEntries = 2000;
+    private static readonly TimeSpan SessionFilesCacheTtl = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan CostSummaryCacheTtl = TimeSpan.FromMinutes(5);
     private static readonly string DefaultSessionsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".codex",
@@ -44,8 +47,12 @@ public sealed partial class ViewerService
     private readonly ModelCatalogService _modelCatalog;
     private readonly ExchangeRateService _exchangeRates;
     private readonly ConcurrentDictionary<string, SessionCacheEntry> _cache = new(PathComparer);
+    private readonly SemaphoreSlim _costSummaryCacheLock = new(1, 1);
+    private readonly object _sessionFilesCacheLock = new();
     private IReadOnlyList<string>? _sessionRoots;
     private IReadOnlyList<string>? _wslDistroRoots;
+    private CostSummaryCacheEntry? _costSummaryCache;
+    private SessionFilesCacheEntry? _sessionFilesCache;
 
     public ViewerService(
         LabelStore labelStore,
@@ -150,7 +157,32 @@ public sealed partial class ViewerService
         return _modelCatalog.GetStatus();
     }
 
-    public async Task<CostSummaryResponse> GetCostSummaryAsync(CancellationToken cancellationToken = default)
+    public async Task<CostSummaryResponse> GetCostSummaryAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
+    {
+        if (!forceRefresh && TryGetCachedCostSummary(out var cached))
+        {
+            return cached;
+        }
+
+        await _costSummaryCacheLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!forceRefresh && TryGetCachedCostSummary(out cached))
+            {
+                return cached;
+            }
+
+            var response = await BuildCostSummaryAsync(cancellationToken);
+            _costSummaryCache = new CostSummaryCacheEntry(DateTimeOffset.UtcNow, response);
+            return response;
+        }
+        finally
+        {
+            _costSummaryCacheLock.Release();
+        }
+    }
+
+    private async Task<CostSummaryResponse> BuildCostSummaryAsync(CancellationToken cancellationToken = default)
     {
         var timeZone = TimeZoneInfo.Local;
         var nowLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime;
@@ -290,6 +322,9 @@ public sealed partial class ViewerService
         string? sort,
         int? sessionLabelId,
         int? eventLabelId,
+        bool forceRefreshSessionFiles = false,
+        int? offset = null,
+        int? limit = null,
         CancellationToken cancellationToken = default)
     {
         var roots = GetSessionRoots();
@@ -303,7 +338,7 @@ public sealed partial class ViewerService
             .ToArray();
 
         var sessions = new List<SessionSummaryDto>();
-        foreach (var path in EnumerateSessionFiles(roots))
+        foreach (var path in EnumerateSessionFiles(roots, forceRefreshSessionFiles))
         {
             cancellationToken.ThrowIfCancellationRequested();
             IndexRecord record;
@@ -316,7 +351,7 @@ public sealed partial class ViewerService
                 continue;
             }
 
-            if (terms.Length > 0 && !MatchesTerms(record.SearchText, terms, normalizedMode))
+            if (terms.Length > 0 && !MatchesSearchTerms(record, path, terms, normalizedMode))
             {
                 continue;
             }
@@ -350,21 +385,95 @@ public sealed partial class ViewerService
                 .ThenByDescending(session => session.Mtime, StringComparer.Ordinal),
         };
 
+        var limitedSessions = ordered.Take(settings.SessionListMax).ToArray();
+        var totalCount = limitedSessions.Length;
+        var normalizedOffset = Math.Clamp(offset ?? 0, 0, totalCount);
+        var defaultLimit = offset.HasValue || limit.HasValue
+            ? settings.SessionListInitialLoadCount
+            : settings.SessionListMax;
+        var normalizedLimit = Math.Clamp(limit ?? defaultLimit, 1, settings.SessionListMax);
+        var pageSessions = limitedSessions
+            .Skip(normalizedOffset)
+            .Take(normalizedLimit)
+            .ToArray();
         return new SessionListResponse
         {
             Root = string.Join(" | ", roots),
-            Sessions = ordered.Take(settings.SessionListMax).ToArray(),
+            Sessions = pageSessions,
+            TotalCount = totalCount,
+            Offset = normalizedOffset,
+            Limit = normalizedLimit,
+            HasMore = normalizedOffset + pageSessions.Length < totalCount,
+        };
+    }
+
+    public async Task<SessionListResponse> GetSessionsLiteAsync(
+        string? sort,
+        int? offset,
+        int? limit,
+        CancellationToken cancellationToken = default)
+    {
+        var roots = GetSessionRoots();
+        var settings = _viewerSettings.GetSnapshot();
+        var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
+        var normalizedSort = sort is "asc" or "updated" ? sort : "desc";
+        var allPaths = EnumerateSessionFiles(roots).ToArray();
+        if (normalizedSort == "asc")
+        {
+            Array.Reverse(allPaths);
+        }
+
+        var limitedPaths = allPaths.Take(settings.SessionListMax).ToArray();
+        var totalCount = limitedPaths.Length;
+        var normalizedOffset = Math.Clamp(offset ?? 0, 0, totalCount);
+        var normalizedLimit = Math.Clamp(limit ?? settings.SessionListInitialLoadCount, 1, settings.SessionListMax);
+        var pagePaths = limitedPaths
+            .Skip(normalizedOffset)
+            .Take(normalizedLimit)
+            .ToArray();
+
+        var sessions = new List<SessionSummaryDto>(pagePaths.Length);
+        foreach (var path in pagePaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            IndexRecord record;
+            try
+            {
+                record = GetOrBuildIndexRecord(path);
+            }
+            catch (FileNotFoundException)
+            {
+                continue;
+            }
+
+            var sessionLabelIds = snapshot.SessionLabels.TryGetValue(record.Summary.Path, out var labelIds)
+                ? labelIds
+                : Array.Empty<int>();
+            sessions.Add(WithSessionLabelIds(record.Summary, sessionLabelIds));
+        }
+
+        return new SessionListResponse
+        {
+            Root = string.Join(" | ", roots),
+            Sessions = sessions,
+            TotalCount = totalCount,
+            Offset = normalizedOffset,
+            Limit = normalizedLimit,
+            HasMore = normalizedOffset + sessions.Count < totalCount,
         };
     }
 
     public async Task<SessionDetailResponse> GetSessionAsync(string? rawPath, bool includeEvents, CancellationToken cancellationToken = default)
     {
         var path = ResolveSessionPath(rawPath);
-        if (!File.Exists(path))
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
         {
             throw new FileNotFoundException("session file not found");
         }
 
+        var sessionVersion = BuildSessionVersion(fileInfo);
         var snapshot = await _labelStore.GetSnapshotAsync(cancellationToken);
         var indexRecord = GetOrBuildIndexRecord(path);
         var sessionPath = indexRecord.Summary.Path;
@@ -379,6 +488,7 @@ public sealed partial class ViewerService
                     indexRecord.Summary,
                     sessionLabelIds,
                     ResolveLabels(sessionLabelIds, snapshot.LabelById)),
+                SessionVersion = sessionVersion,
                 ExchangeRate = exchangeRate,
             };
         }
@@ -394,6 +504,7 @@ public sealed partial class ViewerService
                 indexRecord.Summary,
                 sessionLabelIds,
                 ResolveLabels(sessionLabelIds, snapshot.LabelById)),
+            SessionVersion = sessionVersion,
             Events = eventsData.Events
                 .Select(@event => WithEventLabels(
                     @event,
@@ -406,6 +517,22 @@ public sealed partial class ViewerService
             RawLineCount = eventsData.RawLineCount,
             ExchangeRate = exchangeRate,
             Usage = eventsData.Usage,
+        };
+    }
+
+    public SessionVersionResponse GetSessionVersion(string? rawPath)
+    {
+        var path = ResolveSessionPath(rawPath);
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
+        {
+            throw new FileNotFoundException("session file not found");
+        }
+
+        return new SessionVersionResponse
+        {
+            Path = path,
+            SessionVersion = BuildSessionVersion(fileInfo),
         };
     }
 
@@ -837,11 +964,16 @@ public sealed partial class ViewerService
             CallId = @event.CallId,
             Output = @event.Output,
             Model = @event.Model,
+            ReasoningEffort = @event.ReasoningEffort,
             InputTokens = @event.InputTokens,
             CachedInputTokens = @event.CachedInputTokens,
             OutputTokens = @event.OutputTokens,
             ReasoningOutputTokens = @event.ReasoningOutputTokens,
             TotalTokens = @event.TotalTokens,
+            InputCostUsd = @event.InputCostUsd,
+            CachedInputCostUsd = @event.CachedInputCostUsd,
+            OutputCostUsd = @event.OutputCostUsd,
+            ReasoningCostUsd = @event.ReasoningCostUsd,
             CostUsd = @event.CostUsd,
             SystemLabels = @event.SystemLabels,
             Labels = labels,
@@ -939,6 +1071,107 @@ public sealed partial class ViewerService
         }
     }
 
+    private bool TryGetCachedCostSummary(out CostSummaryResponse response)
+    {
+        var cached = _costSummaryCache;
+        if (cached is not null && DateTimeOffset.UtcNow - cached.BuiltAtUtc <= CostSummaryCacheTtl)
+        {
+            response = cached.Response;
+            return true;
+        }
+
+        response = null!;
+        return false;
+    }
+
+    private SessionSummaryDto? TryGetCachedSummary(string path)
+    {
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
+        {
+            _cache.TryRemove(path, out _);
+            throw new FileNotFoundException("session file not found", path);
+        }
+
+        var signature = GetSignature(fileInfo);
+        if (_cache.TryGetValue(path, out var cached)
+            && cached.Signature == signature
+            && cached.IndexRecord is not null)
+        {
+            cached.LastAccessedTicks = Environment.TickCount64;
+            return cached.IndexRecord.Summary;
+        }
+
+        return null;
+    }
+
+    private SessionSummaryDto BuildLiteSummary(string path)
+    {
+        var fileInfo = new FileInfo(path);
+        if (!fileInfo.Exists)
+        {
+            throw new FileNotFoundException("session file not found", path);
+        }
+
+        var summary = new SessionSummaryDto
+        {
+            Id = System.IO.Path.GetFileNameWithoutExtension(path),
+            Path = CanonicalizePath(path),
+            RelativePath = ToRelativePath(path),
+            Mtime = fileInfo.LastWriteTime.ToString("s"),
+            SessionId = string.Empty,
+            StartedAt = string.Empty,
+            Cwd = string.Empty,
+            Model = string.Empty,
+            ReasoningEffort = string.Empty,
+            Source = "cli",
+            IsSubagent = false,
+            FirstUserText = string.Empty,
+            FirstRealUserText = string.Empty,
+            MinEventTs = string.Empty,
+            MaxEventTs = string.Empty,
+        };
+
+        try
+        {
+            foreach (var line in File.ReadLines(path).Take(8))
+            {
+                if (!TryParseJson(line, out var root))
+                {
+                    continue;
+                }
+
+                using (root)
+                {
+                    var element = root.RootElement;
+                    if (GetString(element, "type") != "session_meta" || !element.TryGetProperty("payload", out var payload))
+                    {
+                        continue;
+                    }
+
+                    var rawSource = GetString(payload, "source");
+                    var originator = GetString(payload, "originator");
+                    summary = summary with
+                    {
+                        SessionId = GetString(payload, "id"),
+                        StartedAt = GetString(payload, "timestamp"),
+                        Cwd = GetString(payload, "cwd"),
+                        Model = GetString(payload, "model_provider"),
+                        Source = ClassifySource(rawSource, originator),
+                        IsSubagent = IsSubagentSource(rawSource, originator),
+                    };
+                    break;
+                }
+            }
+        }
+        catch
+        {
+            // Keep partial summary if the file is unreadable.
+        }
+
+        return summary;
+    }
+
     private IndexRecord BuildIndexRecord(string path, FileInfo fileInfo)
     {
         var summary = new SessionSummaryDto
@@ -953,6 +1186,7 @@ public sealed partial class ViewerService
             Model = string.Empty,
             ReasoningEffort = string.Empty,
             Source = "cli",
+            IsSubagent = false,
             FirstUserText = string.Empty,
             FirstRealUserText = string.Empty,
             MinEventTs = string.Empty,
@@ -993,13 +1227,14 @@ public sealed partial class ViewerService
                                 Cwd = GetString(payload, "cwd"),
                                 Model = GetString(payload, "model_provider"),
                                 Source = ClassifySource(GetString(payload, "source"), GetString(payload, "originator")),
+                                IsSubagent = IsSubagentSource(GetString(payload, "source"), GetString(payload, "originator")),
                             };
                             break;
                         case "turn_context":
                             summary = UpdateSummaryFromTurnContext(summary, payload);
                             break;
                         case "response_item":
-                            searchLength = AppendResponseItemSearchText(payload, summary.Source, searchChunks, searchLength);
+                            searchLength = AppendResponseItemSearchText(payload, searchChunks, searchLength);
                             summary = UpdateSummaryFromResponseItem(summary, payload);
                             break;
                         case "event_msg":
@@ -1036,7 +1271,8 @@ public sealed partial class ViewerService
             .Select(NormalizeSearchText)
             .Where(value => !string.IsNullOrWhiteSpace(value));
         var searchText = string.Join(' ', normalizedPrefix.Concat(searchChunks));
-        return new IndexRecord(summary, searchText);
+        var searchTextTruncated = searchLength >= SearchTextLimit;
+        return new IndexRecord(summary, searchText, searchTextTruncated);
     }
 
     private EventsData BuildEventsData(string path, int maxEvents)
@@ -1217,11 +1453,12 @@ public sealed partial class ViewerService
             return null;
         }
 
-        var costUsd = _modelCatalog.TryCalculateCostUsd(
+        var costBreakdown = _modelCatalog.TryCalculateCostBreakdownUsd(
             currentModel,
             normalized.InputTokens,
             normalized.CachedInputTokens,
-            normalized.OutputTokens);
+            normalized.OutputTokens,
+            normalized.ReasoningOutputTokens);
         return new SessionEventDto
         {
             EventId = $"line-{rawLineCount}",
@@ -1235,7 +1472,11 @@ public sealed partial class ViewerService
             OutputTokens = normalized.OutputTokens,
             ReasoningOutputTokens = normalized.ReasoningOutputTokens,
             TotalTokens = normalized.TotalTokens,
-            CostUsd = costUsd,
+            InputCostUsd = costBreakdown?.InputCostUsd,
+            CachedInputCostUsd = costBreakdown?.CachedInputCostUsd,
+            OutputCostUsd = costBreakdown?.OutputCostUsd,
+            ReasoningCostUsd = costBreakdown?.ReasoningCostUsd,
+            CostUsd = costBreakdown?.TotalCostUsd,
         };
     }
 
@@ -1424,25 +1665,9 @@ public sealed partial class ViewerService
         return summary with { ReasoningEffort = reasoningEffort };
     }
 
-    private static int AppendResponseItemSearchText(JsonElement payload, string source, List<string> searchChunks, int currentLength)
+    private static int AppendResponseItemSearchText(JsonElement payload, List<string> searchChunks, int currentLength)
     {
-        var responseType = GetString(payload, "type");
-        return responseType switch
-        {
-            "message" => AppendSearchChunk(searchChunks, ExtractTextFromContent(payload), currentLength, SearchTextLimit),
-            "function_call" => AppendSearchChunk(
-                searchChunks,
-                string.Join(' ',
-                    new[]
-                    {
-                        GetValueText(payload, "name"),
-                        GetValueText(payload, "arguments"),
-                    }.Where(value => !string.IsNullOrWhiteSpace(value))),
-                currentLength,
-                SearchTextLimit),
-            "function_call_output" => AppendSearchChunk(searchChunks, GetValueText(payload, "output"), currentLength, SearchTextLimit),
-            _ => currentLength,
-        };
+        return AppendSearchChunk(searchChunks, ExtractResponseItemSearchText(payload), currentLength, SearchTextLimit);
     }
 
     private static int AppendSearchChunk(List<string> chunks, string text, int currentLength, int limit)
@@ -1479,8 +1704,28 @@ public sealed partial class ViewerService
         summary = summary with { MinEventTs = min, MaxEventTs = max };
     }
 
-    private IEnumerable<string> EnumerateSessionFiles(IEnumerable<string> roots)
+    private IEnumerable<string> EnumerateSessionFiles(IEnumerable<string> roots, bool forceRefresh = false)
     {
+        var normalizedRoots = roots
+            .Where(root => !string.IsNullOrWhiteSpace(root))
+            .Select(CanonicalizePath)
+            .Distinct(PathComparer)
+            .OrderBy(root => root, PathComparer)
+            .ToArray();
+        var cacheKey = string.Join("|", normalizedRoots);
+        var now = DateTime.UtcNow;
+
+        lock (_sessionFilesCacheLock)
+        {
+            if (!forceRefresh
+                && _sessionFilesCache is not null
+                && _sessionFilesCache.RootsKey == cacheKey
+                && now - _sessionFilesCache.BuiltAtUtc <= SessionFilesCacheTtl)
+            {
+                return _sessionFilesCache.Paths;
+            }
+        }
+
         var files = new Dictionary<string, FileInfo>(PathComparer);
         var options = new EnumerationOptions
         {
@@ -1488,7 +1733,7 @@ public sealed partial class ViewerService
             IgnoreInaccessible = true,
             ReturnSpecialDirectories = false,
         };
-        foreach (var root in roots)
+        foreach (var root in normalizedRoots)
         {
             if (!Directory.Exists(root))
             {
@@ -1505,11 +1750,23 @@ public sealed partial class ViewerService
             }
         }
 
-        return files.Values
+        var result = files.Values
             .OrderByDescending(file => file.LastWriteTimeUtc)
             .ThenBy(file => file.FullName, PathComparer)
             .Select(file => file.FullName)
             .ToArray();
+
+        lock (_sessionFilesCacheLock)
+        {
+            _sessionFilesCache = new SessionFilesCacheEntry
+            {
+                RootsKey = cacheKey,
+                BuiltAtUtc = now,
+                Paths = result,
+            };
+        }
+
+        return result;
     }
 
     private string ToRelativePath(string path)
@@ -1902,11 +2159,33 @@ public sealed partial class ViewerService
         return new SessionSignature(fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length);
     }
 
+    private static string BuildSessionVersion(FileInfo fileInfo)
+    {
+        var signature = GetSignature(fileInfo);
+        return $"{signature.LastWriteTicks}:{signature.Size}";
+    }
+
     private static bool MatchesTerms(string searchText, IReadOnlyList<string> terms, string mode)
     {
         return mode == "or"
             ? terms.Any(term => searchText.Contains(term, StringComparison.Ordinal))
             : terms.All(term => searchText.Contains(term, StringComparison.Ordinal));
+    }
+
+    private static bool MatchesSearchTerms(IndexRecord record, string path, IReadOnlyList<string> terms, string mode)
+    {
+        if (MatchesTerms(record.SearchText, terms, mode))
+        {
+            return true;
+        }
+
+        if (!record.SearchTextTruncated)
+        {
+            return false;
+        }
+
+        var fullSearchText = BuildFullSearchText(record.Summary, path);
+        return MatchesTerms(fullSearchText, terms, mode);
     }
 
     private static IEnumerable<string> ParseSearchQuery(string? query)
@@ -1962,6 +2241,76 @@ public sealed partial class ViewerService
             : WhitespaceRegex().Replace(text, " ").Trim().ToLowerInvariant();
     }
 
+    private static string BuildFullSearchText(SessionSummaryDto summary, string path)
+    {
+        var builder = new StringBuilder();
+        foreach (var prefix in new[]
+        {
+            summary.RelativePath,
+            summary.Cwd,
+            summary.SessionId,
+            summary.Source,
+            summary.FirstUserText,
+            summary.FirstRealUserText,
+        })
+        {
+            AppendNormalizedSearchText(builder, prefix);
+        }
+
+        try
+        {
+            foreach (var line in File.ReadLines(path))
+            {
+                if (!TryParseJson(line, out var root))
+                {
+                    continue;
+                }
+
+                using (root)
+                {
+                    var element = root.RootElement;
+                    var type = GetString(element, "type");
+                    if (!element.TryGetProperty("payload", out var payload))
+                    {
+                        continue;
+                    }
+
+                    switch (type)
+                    {
+                        case "response_item":
+                            AppendNormalizedSearchText(builder, ExtractResponseItemSearchText(payload));
+                            break;
+                        case "event_msg" when GetString(payload, "type") == "agent_message":
+                            AppendNormalizedSearchText(builder, GetValueText(payload, "message"));
+                            break;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fall back to the indexed prefix when the file cannot be read.
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendNormalizedSearchText(StringBuilder builder, string text)
+    {
+        var normalized = NormalizeSearchText(text);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return;
+        }
+
+        if (builder.Length > 0)
+        {
+            builder.Append(' ');
+        }
+
+        builder.Append(normalized);
+    }
+
     private static string ClassifySource(string rawSource, string originator)
     {
         var source = rawSource.Trim().ToLowerInvariant();
@@ -1982,6 +2331,24 @@ public sealed partial class ViewerService
         }
 
         return "cli";
+    }
+
+    private static bool IsSubagentSource(string rawSource, string originator)
+    {
+        var source = rawSource.Trim().ToLowerInvariant();
+        var origin = originator.Trim().ToLowerInvariant();
+        if (source is "exec" or "codex_exec")
+        {
+            return true;
+        }
+
+        if (origin is "exec" or "codex_exec")
+        {
+            return true;
+        }
+
+        return source.Contains("exec", StringComparison.Ordinal)
+            || origin.Contains("exec", StringComparison.Ordinal);
     }
 
     private static string ClassifyUserMessage(string text)
@@ -2045,6 +2412,23 @@ public sealed partial class ViewerService
         }
 
         return items;
+    }
+
+    private static string ExtractResponseItemSearchText(JsonElement payload)
+    {
+        var responseType = GetString(payload, "type");
+        return responseType switch
+        {
+            "message" => ExtractTextFromContent(payload),
+            "function_call" => string.Join(' ',
+                new[]
+                {
+                    GetValueText(payload, "name"),
+                    GetValueText(payload, "arguments"),
+                }.Where(value => !string.IsNullOrWhiteSpace(value))),
+            "function_call_output" => GetValueText(payload, "output"),
+            _ => string.Empty,
+        };
     }
 
     private static string GetString(JsonElement element, string propertyName)
@@ -2112,7 +2496,16 @@ public sealed partial class ViewerService
         }
     }
 
-    private sealed record IndexRecord(SessionSummaryDto Summary, string SearchText);
+    private sealed class SessionFilesCacheEntry
+    {
+        public string RootsKey { get; init; } = string.Empty;
+
+        public DateTime BuiltAtUtc { get; init; }
+
+        public IReadOnlyList<string> Paths { get; init; } = Array.Empty<string>();
+    }
+
+    private sealed record IndexRecord(SessionSummaryDto Summary, string SearchText, bool SearchTextTruncated);
 
     private sealed record EventsData(
         IReadOnlyList<SessionEventDto> Events,
@@ -2144,6 +2537,10 @@ public sealed partial class ViewerService
     private sealed record CostSummaryGroupDefinition(
         string Key,
         IReadOnlyList<CostSummaryPeriodDefinition> Periods);
+
+    private sealed record CostSummaryCacheEntry(
+        DateTimeOffset BuiltAtUtc,
+        CostSummaryResponse Response);
 
     private sealed class CostSummaryGroupAccumulator
     {
@@ -2213,6 +2610,10 @@ public sealed partial class ViewerService
         private long _outputTokens;
         private long _reasoningOutputTokens;
         private long _totalTokens;
+        private decimal _inputCostUsd;
+        private decimal _cachedInputCostUsd;
+        private decimal _outputCostUsd;
+        private decimal _reasoningCostUsd;
         private decimal _costUsd;
         private bool _hasUnknownPricing;
 
@@ -2225,8 +2626,16 @@ public sealed partial class ViewerService
             _reasoningOutputTokens += usage.ReasoningOutputTokens;
             _totalTokens += usage.TotalTokens;
 
-            if (usage.CostUsd.HasValue)
+            if (usage.CostUsd.HasValue
+                && usage.InputCostUsd.HasValue
+                && usage.CachedInputCostUsd.HasValue
+                && usage.OutputCostUsd.HasValue
+                && usage.ReasoningCostUsd.HasValue)
             {
+                _inputCostUsd += usage.InputCostUsd.Value;
+                _cachedInputCostUsd += usage.CachedInputCostUsd.Value;
+                _outputCostUsd += usage.OutputCostUsd.Value;
+                _reasoningCostUsd += usage.ReasoningCostUsd.Value;
                 _costUsd += usage.CostUsd.Value;
             }
             else
@@ -2244,8 +2653,16 @@ public sealed partial class ViewerService
             _reasoningOutputTokens += usageEvent.ReasoningOutputTokens;
             _totalTokens += usageEvent.TotalTokens;
 
-            if (usageEvent.CostUsd.HasValue)
+            if (usageEvent.CostUsd.HasValue
+                && usageEvent.InputCostUsd.HasValue
+                && usageEvent.CachedInputCostUsd.HasValue
+                && usageEvent.OutputCostUsd.HasValue
+                && usageEvent.ReasoningCostUsd.HasValue)
             {
+                _inputCostUsd += usageEvent.InputCostUsd.Value;
+                _cachedInputCostUsd += usageEvent.CachedInputCostUsd.Value;
+                _outputCostUsd += usageEvent.OutputCostUsd.Value;
+                _reasoningCostUsd += usageEvent.ReasoningCostUsd.Value;
                 _costUsd += usageEvent.CostUsd.Value;
             }
             else
@@ -2265,6 +2682,10 @@ public sealed partial class ViewerService
                 OutputTokens = _outputTokens,
                 ReasoningOutputTokens = _reasoningOutputTokens,
                 TotalTokens = _totalTokens,
+                InputCostUsd = _hasUnknownPricing ? null : _inputCostUsd,
+                CachedInputCostUsd = _hasUnknownPricing ? null : _cachedInputCostUsd,
+                OutputCostUsd = _hasUnknownPricing ? null : _outputCostUsd,
+                ReasoningCostUsd = _hasUnknownPricing ? null : _reasoningCostUsd,
                 CostUsd = _hasUnknownPricing ? null : _costUsd,
             };
         }
@@ -2278,6 +2699,10 @@ public sealed partial class ViewerService
         private long _outputTokens;
         private long _reasoningOutputTokens;
         private long _totalTokens;
+        private decimal _inputCostUsd;
+        private decimal _cachedInputCostUsd;
+        private decimal _outputCostUsd;
+        private decimal _reasoningCostUsd;
         private decimal _costUsd;
         private bool _hasUnknownPricing;
 
@@ -2301,8 +2726,16 @@ public sealed partial class ViewerService
                 _models.Add(@event.Model);
             }
 
-            if (@event.CostUsd.HasValue)
+            if (@event.CostUsd.HasValue
+                && @event.InputCostUsd.HasValue
+                && @event.CachedInputCostUsd.HasValue
+                && @event.OutputCostUsd.HasValue
+                && @event.ReasoningCostUsd.HasValue)
             {
+                _inputCostUsd += @event.InputCostUsd.Value;
+                _cachedInputCostUsd += @event.CachedInputCostUsd.Value;
+                _outputCostUsd += @event.OutputCostUsd.Value;
+                _reasoningCostUsd += @event.ReasoningCostUsd.Value;
                 _costUsd += @event.CostUsd.Value;
             }
             else
@@ -2321,6 +2754,10 @@ public sealed partial class ViewerService
                 OutputTokens = _outputTokens,
                 ReasoningOutputTokens = _reasoningOutputTokens,
                 TotalTokens = _totalTokens,
+                InputCostUsd = _hasUnknownPricing ? null : _inputCostUsd,
+                CachedInputCostUsd = _hasUnknownPricing ? null : _cachedInputCostUsd,
+                OutputCostUsd = _hasUnknownPricing ? null : _outputCostUsd,
+                ReasoningCostUsd = _hasUnknownPricing ? null : _reasoningCostUsd,
                 CostUsd = _hasUnknownPricing ? null : _costUsd,
             };
         }
