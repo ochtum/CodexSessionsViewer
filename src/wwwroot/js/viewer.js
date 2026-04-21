@@ -1801,6 +1801,8 @@ let loadSessionsRequestSeq = 0;
 let loadSessionDetailRequestSeq = 0;
 let loadLabeledItemsRequestSeq = 0;
 let todayUsageSummaryRequestSeq = 0;
+let labeledViewsRefreshTimer = 0;
+const labelMutationInFlight = new Set();
 let costSummaryRefreshTimer = 0;
 let saveFiltersFrame = 0;
 let deferredDetailSyncTimer = 0;
@@ -5515,62 +5517,231 @@ async function refreshLabeledViews(){
   }
 }
 
+function scheduleLabeledViewsRefresh(){
+  if(labeledViewsRefreshTimer){
+    clearTimeout(labeledViewsRefreshTimer);
+  }
+  labeledViewsRefreshTimer = window.setTimeout(() => {
+    labeledViewsRefreshTimer = 0;
+    void refreshLabeledViews();
+  }, 50);
+}
+
+function getLabelMutationKey(kind, path, eventId, labelId){
+  const safePath = path || '';
+  const safeEventId = eventId || '';
+  return `${kind}|${safePath}|${safeEventId}|${labelId}`;
+}
+
+function beginLabelMutation(kind, path, eventId, labelId){
+  const key = getLabelMutationKey(kind, path, eventId, labelId);
+  if(labelMutationInFlight.has(key)){
+    return null;
+  }
+  labelMutationInFlight.add(key);
+  return key;
+}
+
+function endLabelMutation(key){
+  if(!key){
+    return;
+  }
+  labelMutationInFlight.delete(key);
+}
+
+function findLabelById(labelId){
+  const targetId = Number(labelId);
+  if(!Number.isFinite(targetId)){
+    return null;
+  }
+  return state.labels.find(label => Number(label.id) === targetId) || null;
+}
+
+function updateLabelListArray(currentLabels, labelId, shouldAdd){
+  const labels = Array.isArray(currentLabels) ? currentLabels.slice() : [];
+  const targetId = Number(labelId);
+  const currentIndex = labels.findIndex(label => Number(label && label.id) === targetId);
+  if(shouldAdd){
+    if(currentIndex >= 0){
+      return { labels, changed: false };
+    }
+    const targetLabel = findLabelById(targetId);
+    if(!targetLabel){
+      return { labels, changed: false };
+    }
+    labels.push(targetLabel);
+    return { labels, changed: true };
+  }
+
+  if(currentIndex < 0){
+    return { labels, changed: false };
+  }
+  labels.splice(currentIndex, 1);
+  return { labels, changed: true };
+}
+
+function applyLocalSessionLabelMutation(path, labelId, shouldAdd){
+  let changed = false;
+  const targetPath = path || '';
+  if(!targetPath){
+    return false;
+  }
+
+  const updateSession = (session) => {
+    if(!session || session.path !== targetPath){
+      return session;
+    }
+    const result = updateLabelListArray(session.session_labels, labelId, shouldAdd);
+    if(result.changed){
+      changed = true;
+      return { ...session, session_labels: result.labels };
+    }
+    return session;
+  };
+
+  state.sessions = state.sessions.map(updateSession);
+  state.filtered = state.filtered.map(updateSession);
+  if(state.activeSession && state.activeSession.path === targetPath){
+    state.activeSession = updateSession(state.activeSession);
+  }
+
+  if(changed){
+    renderSessionList();
+    renderSessionLabelStrip();
+    if(state.activePath === targetPath){
+      renderActiveSession();
+    }
+  }
+  return changed;
+}
+
+function applyLocalEventLabelMutation(path, eventId, labelId, shouldAdd){
+  const targetPath = path || '';
+  const targetEventId = eventId ? String(eventId) : '';
+  if(!targetPath || !targetEventId){
+    return false;
+  }
+  if(state.activePath !== targetPath){
+    return false;
+  }
+
+  let changed = false;
+  const events = Array.isArray(state.activeEvents) ? state.activeEvents : [];
+  state.activeEvents = events.map(ev => {
+    if(!ev || String(ev.event_id || '') !== targetEventId){
+      return ev;
+    }
+    const result = updateLabelListArray(ev.labels, labelId, shouldAdd);
+    if(!result.changed){
+      return ev;
+    }
+    changed = true;
+    return { ...ev, labels: result.labels };
+  });
+
+  if(changed){
+    renderActiveSession();
+  }
+  return changed;
+}
+
 async function removeSessionLabel(labelId){
   if(!state.activePath) return;
+  const mutationKey = beginLabelMutation('session-remove', state.activePath, '', labelId);
+  if(!mutationKey){
+    return;
+  }
+  const changed = applyLocalSessionLabelMutation(state.activePath, labelId, false);
   const data = await postJson('/api/session-label/remove', {
     path: state.activePath,
     label_id: labelId,
   });
+  endLabelMutation(mutationKey);
   if(data.error){
+    if(changed){
+      applyLocalSessionLabelMutation(state.activePath, labelId, true);
+    }
     alert(data.error);
     return;
   }
-  await refreshLabeledViews();
+  scheduleLabeledViewsRefresh();
 }
 
 async function addSessionLabelFromButton(button){
   if(!state.activePath) return;
+  const path = state.activePath;
   showLabelPicker(button, async (labelId) => {
+    const mutationKey = beginLabelMutation('session-add', path, '', labelId);
+    if(!mutationKey){
+      return;
+    }
+    const changed = applyLocalSessionLabelMutation(path, labelId, true);
     const data = await postJson('/api/session-label/add', {
-      path: state.activePath,
+      path,
       label_id: labelId,
     });
+    endLabelMutation(mutationKey);
     if(data.error){
+      if(changed){
+        applyLocalSessionLabelMutation(path, labelId, false);
+      }
       alert(data.error);
       return;
     }
-    await refreshLabeledViews();
+    scheduleLabeledViewsRefresh();
   });
 }
 
 async function addEventLabelFromButton(button, eventId){
   if(!state.activePath || !eventId) return;
+  const path = state.activePath;
+  const targetEventId = String(eventId);
   showLabelPicker(button, async (labelId) => {
+    const mutationKey = beginLabelMutation('event-add', path, targetEventId, labelId);
+    if(!mutationKey){
+      return;
+    }
+    const changed = applyLocalEventLabelMutation(path, targetEventId, labelId, true);
     const data = await postJson('/api/event-label/add', {
-      path: state.activePath,
-      event_id: eventId,
+      path,
+      event_id: targetEventId,
       label_id: labelId,
     });
+    endLabelMutation(mutationKey);
     if(data.error){
+      if(changed){
+        applyLocalEventLabelMutation(path, targetEventId, labelId, false);
+      }
       alert(data.error);
       return;
     }
-    await refreshLabeledViews();
+    scheduleLabeledViewsRefresh();
   });
 }
 
 async function removeEventLabel(eventId, labelId){
   if(!state.activePath || !eventId) return;
+  const path = state.activePath;
+  const targetEventId = String(eventId);
+  const mutationKey = beginLabelMutation('event-remove', path, targetEventId, labelId);
+  if(!mutationKey){
+    return;
+  }
+  const changed = applyLocalEventLabelMutation(path, targetEventId, labelId, false);
   const data = await postJson('/api/event-label/remove', {
-    path: state.activePath,
-    event_id: eventId,
+    path,
+    event_id: targetEventId,
     label_id: labelId,
   });
+  endLabelMutation(mutationKey);
   if(data.error){
+    if(changed){
+      applyLocalEventLabelMutation(path, targetEventId, labelId, true);
+    }
     alert(data.error);
     return;
   }
-  await refreshLabeledViews();
+  scheduleLabeledViewsRefresh();
 }
 
 async function copyDisplayedMessages(){
@@ -6585,16 +6756,20 @@ function initViewerPage(){
     await addSessionLabelFromButton(event.currentTarget);
   });
   document.getElementById('events').addEventListener('pointerdown', (event) => {
-    if(!event.target.closest('.ev')){
+    const target = event.target;
+    if(!(target instanceof Element) || !target.closest('.ev')){
       return;
     }
     noteDetailInteraction();
-    if(event.target.closest('pre')){
+    if(target.closest('pre')){
       detailPointerDown = true;
     }
   });
   document.getElementById('events').addEventListener('click', (event) => {
     const target = event.target;
+    if(!(target instanceof Element)){
+      return;
+    }
     const addLabelBtn = target.closest('.event-label-add-button');
     if(addLabelBtn){
       addEventLabelFromButton(addLabelBtn, addLabelBtn.dataset.eventId);
@@ -6624,6 +6799,9 @@ function initViewerPage(){
   });
   document.getElementById('events').addEventListener('change', (event) => {
     const target = event.target;
+    if(!(target instanceof Element)){
+      return;
+    }
     if(target.classList.contains('event-select-checkbox')){
       updateEventSelection(target.dataset.eventId, target.checked, target.closest('.ev'));
       return;
@@ -6634,13 +6812,21 @@ function initViewerPage(){
     }
   });
   document.getElementById('sessions').addEventListener('click', (event) => {
-    const item = event.target.closest('.session-item');
+    const target = event.target;
+    if(!(target instanceof Element)){
+      return;
+    }
+    const item = target.closest('.session-item');
     if(item && item.dataset.path){
       openSession(item.dataset.path);
     }
   });
   document.getElementById('labeled_items').addEventListener('click', async (event) => {
-    const item = event.target.closest('.labeled-item');
+    const target = event.target;
+    if(!(target instanceof Element)){
+      return;
+    }
+    const item = target.closest('.labeled-item');
     if(!item || !item.dataset.path){
       return;
     }
@@ -6676,9 +6862,11 @@ function initViewerPage(){
   document.addEventListener('click', (event) => {
     const picker = document.getElementById('label_picker');
     if(picker.classList.contains('hidden')) return;
-    if(picker.contains(event.target)) return;
-    if(event.target.closest('.event-label-add-button')) return;
-    if(event.target.closest('#add_session_label')) return;
+    const target = event.target;
+    if(!(target instanceof Element)) return;
+    if(picker.contains(target)) return;
+    if(target.closest('.event-label-add-button')) return;
+    if(target.closest('#add_session_label')) return;
     hideLabelPicker();
   });
   document.getElementById('shortcut_dialog').addEventListener('click', (event) => {
